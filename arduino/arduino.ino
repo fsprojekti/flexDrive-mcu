@@ -31,6 +31,11 @@ TaskHandle_t DisplayTaskHandle = NULL;
 TaskHandle_t encoderTaskHandle = NULL;
 TaskHandle_t encoder2TaskHandle = NULL;
 
+typedef union {
+  float number;
+  uint8_t bytes[4];
+} FLOATUNION_t;
+
 // ISR for encoder
 void IRAM_ATTR encoder1ISR() {
   static int lastState = LOW;
@@ -134,15 +139,39 @@ void serialReceiveTask(void *pvParameters) {
 
 void sendEncoderData(void *pvParameters) {
   TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(1);  // 1 ms delay
-  xLastWakeTime = xTaskGetTickCount();             // Initialize the xLastWakeTime variable with the current time.
+  const TickType_t xFrequency = pdMS_TO_TICKS(10);  // 10 ms delay
+  xLastWakeTime = xTaskGetTickCount();               // Initialize the xLastWakeTime variable with the current time.
 
   while (1) {
     // Wait for the next cycle.
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    Serial.print(encoder1Position);
-    Serial.print(" ");
-    Serial.println(encoder2Position);
+
+    //Encoder 1
+    FLOATUNION_t encoder1Float;
+    encoder1Float.number = (float)encoder1Position;
+
+    //Encoder 2
+    FLOATUNION_t encoder2Float;
+    encoder2Float.number = (float)encoder2Position;
+
+    Serial.write('A');
+
+    // Print float data
+    for (int i = 0; i < 4; i++) {
+      Serial.write(encoder1Float.bytes[i]);
+    }
+
+     // Print float data
+    for (int i = 0; i < 4; i++) {
+      Serial.write(encoder2Float.bytes[i]);
+    }
+
+    // Print terminator
+    Serial.print('\n');
+
+    // Serial.print(encoder1Position);
+    // Serial.print(";");
+    // Serial.println(encoder2Position);
   }
 }
 
