@@ -24,6 +24,8 @@ const int encoder2PinB = 37;
 volatile long encoder1Position = 0;
 volatile long encoder2Position = 0;
 
+ String receivedDataGlobal = "";
+
 // FreeRTOS Task Handle
 TaskHandle_t DisplayTaskHandle = NULL;
 
@@ -100,6 +102,7 @@ void displayTask(void *pvParameters) {
     tft.drawString("DIR: " + String(dirDrive), 10, 40);
     tft.drawString("Enc1: " + String(encoder1Position), 10, 70);
     tft.drawString("Enc2: " + String(encoder2Position), 10, 100);
+    tft.drawString("Msg: " + receivedDataGlobal, 100, 10);
     vTaskDelay(pdMS_TO_TICKS(100));  // Update the display every 100 ms
   }
 }
@@ -110,12 +113,14 @@ void serialReceiveTask(void *pvParameters) {
   String receivedData = "";
 
   while (1) {
-    if (Serial.available() > 0) {
+    if (Serial.available() >= 8) {
+      FLOATUNION_t pwmFloat, dirFloat,
       // Read the incoming data
       incomingChar = Serial.read();
       // Check for end of line or new message character
       if (incomingChar == '\n' || incomingChar == '\r') {
         if (receivedData.length() > 0) {
+        receivedDataGlobal = receivedData;
           // Process the complete message
           int idx = receivedData.indexOf(' ');
           if (idx != -1) {
@@ -139,7 +144,7 @@ void serialReceiveTask(void *pvParameters) {
 
 void sendEncoderData(void *pvParameters) {
   TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(10);  // 10 ms delay
+  const TickType_t xFrequency = pdMS_TO_TICKS(10);  // 100 ms delay
   xLastWakeTime = xTaskGetTickCount();               // Initialize the xLastWakeTime variable with the current time.
 
   while (1) {
