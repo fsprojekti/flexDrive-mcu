@@ -24,19 +24,12 @@ const int encoder2PinB = 37;
 volatile long encoder1Position = 0;
 volatile long encoder2Position = 0;
 
- String receivedDataGlobal = "";
-
 // FreeRTOS Task Handle
 TaskHandle_t DisplayTaskHandle = NULL;
 
 // Task handle for the encoder task
 TaskHandle_t encoderTaskHandle = NULL;
 TaskHandle_t encoder2TaskHandle = NULL;
-
-typedef union {
-  float number;
-  uint8_t bytes[4];
-} FLOATUNION_t;
 
 // ISR for encoder
 void IRAM_ATTR encoder1ISR() {
@@ -102,7 +95,6 @@ void displayTask(void *pvParameters) {
     tft.drawString("DIR: " + String(dirDrive), 10, 40);
     tft.drawString("Enc1: " + String(encoder1Position), 10, 70);
     tft.drawString("Enc2: " + String(encoder2Position), 10, 100);
-    tft.drawString("Msg: " + receivedDataGlobal, 100, 10);
     vTaskDelay(pdMS_TO_TICKS(100));  // Update the display every 100 ms
   }
 }
@@ -113,14 +105,12 @@ void serialReceiveTask(void *pvParameters) {
   String receivedData = "";
 
   while (1) {
-    if (Serial.available() >= 8) {
-      FLOATUNION_t pwmFloat, dirFloat,
+    if (Serial.available() >= 8) { 
       // Read the incoming data
       incomingChar = Serial.read();
       // Check for end of line or new message character
       if (incomingChar == '\n' || incomingChar == '\r') {
         if (receivedData.length() > 0) {
-        receivedDataGlobal = receivedData;
           // Process the complete message
           int idx = receivedData.indexOf(' ');
           if (idx != -1) {
@@ -150,33 +140,9 @@ void sendEncoderData(void *pvParameters) {
   while (1) {
     // Wait for the next cycle.
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-    //Encoder 1
-    FLOATUNION_t encoder1Float;
-    encoder1Float.number = (float)encoder1Position;
-
-    //Encoder 2
-    FLOATUNION_t encoder2Float;
-    encoder2Float.number = (float)encoder2Position;
-
-    Serial.write('A');
-
-    // Print float data
-    for (int i = 0; i < 4; i++) {
-      Serial.write(encoder1Float.bytes[i]);
-    }
-
-     // Print float data
-    for (int i = 0; i < 4; i++) {
-      Serial.write(encoder2Float.bytes[i]);
-    }
-
-    // Print terminator
-    Serial.print('\n');
-
-    // Serial.print(encoder1Position);
-    // Serial.print(";");
-    // Serial.println(encoder2Position);
+    Serial.print(encoder1Position);
+    Serial.print(" ");
+    Serial.println(encoder2Position);
   }
 }
 
