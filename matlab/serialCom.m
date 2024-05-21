@@ -16,7 +16,7 @@ function setup(block)
     block.OutputPort(1).SamplingMode = 'Sample';
 
     % Setup input port properties
-    block.InputPort(1).Dimensions = 2;
+    block.InputPort(1).Dimensions = 1;
     block.InputPort(1).DatatypeID = 0; % double
     block.InputPort(1).Complexity = 'Real';
     block.InputPort(1).DirectFeedthrough = false;
@@ -67,7 +67,7 @@ function Outputs(block)
 
         % Write data to seriap port
         dataToSend = block.InputPort(1).Data;
-        writeline(serialPortObj, strtrim(sprintf('%d ', dataToSend)));
+        writeline(serialPortObj, strtrim(sprintf('%.0f ', dataToSend)));
     end
     
 end
