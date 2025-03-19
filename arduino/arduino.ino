@@ -28,6 +28,9 @@ volatile long encoder2Position = 0;
 float encoder1Velocity = 0.0;
 float encoder2Velocity = 0.0;
 
+//Sampling time in ms
+int ts=10;
+
 // Filter Constant for Velocity Calculation
 const float alpha = 0.25;  // Higher value = less filtering, Lower value = more filtering
 
@@ -410,13 +413,13 @@ void sendEncoderData(void *pvParameters) {
       Serial.print(" ");
       Serial.println(encoder2Velocity);
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(ts));
   }
 }
 
 // Task to calculate velocities and handle control logic every 100 ms
 void controlAndVelocityTask(void *pvParameters) {
-  const TickType_t xFrequency = pdMS_TO_TICKS(100); // 100 ms
+  const TickType_t xFrequency = pdMS_TO_TICKS(ts); // 100 ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
   long lastEncoder1Position = 0;
   long lastEncoder2Position = 0;
