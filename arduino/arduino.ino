@@ -544,6 +544,9 @@ void setup() {
   xTaskCreate(cliTask, "CLI Task", 2048, NULL, 1, NULL);
   xTaskCreate(sendEncoderData, "Send Data", 2048, NULL, 1, NULL);
   xTaskCreate(controlAndVelocityTask, "Calculate Velocity and control task", 2048, NULL, 1, NULL);
+
+  //Message to serial device that controller is now ready to
+  Serial.println("READY");
 }
 
 void loop() {
