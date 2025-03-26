@@ -45,7 +45,7 @@ function Outputs(block)
     pwmVal = abs(pwmVal);
     
     if ~isempty(serialPortObj) && isvalid(serialPortObj)
-        writeline(serialPortObj, sprintf('pwm %d', pwmVal));
+        writeline(serialPortObj, sprintf('pwm %d', int32(pwmVal)));
         writeline(serialPortObj, sprintf('dir %d', dir));
     end
 end
