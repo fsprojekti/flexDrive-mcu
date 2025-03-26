@@ -28,11 +28,14 @@ volatile long encoder2Position = 0;
 float encoder1Velocity = 0.0;
 float encoder2Velocity = 0.0;
 
-//Sampling time in ms
-int ts=10;
+// Sampling time in ms
+int ts = 10;
 
 // Filter Constant for Velocity Calculation
 const float alpha = 0.25;  // Higher value = less filtering, Lower value = more filtering
+
+// Firmware version
+const char* firmwareVersion = "1.0.0";
 
 // SimpleCLI Objects
 SimpleCLI cli;
@@ -49,13 +52,15 @@ Command cmdKi;
 Command cmdKd;
 Command cmdPwmMax;
 Command cmdPlot;
+Command cmdTs;       // New command: set sampling time
+Command cmdVersion;  // New command: fetch firmware version
 
 // Control Variables
 int mode = 0;        // 0 - Open loop, 1 - Closed loop
 int state = 0;       // 0 - Stop, 1 - Run
 int pwmESC = 0;      // PWM value for ESC
 int dir = 1;         // Direction: 1 - Forward, 0 - Reverse
-float ref = 0.3;      // Reference velocity [turn/s]
+float ref = 0.3;     // Reference velocity [turn/s]
 float Kp = 0.1;      // Proportional gain
 float Ki = 0.0;      // Integral gain
 float Kd = 0.0;      // Derivative gain
@@ -112,7 +117,7 @@ void errorCallback(cmd_error* e) {
 
 void cmdInitCallback(cmd* c) {
   Serial.println("System Initialized.");
-  // Add any additional initialization code if necessary
+  // Additional initialization code if needed
 }
 
 void cmdRunCallback(cmd* c) {
@@ -147,6 +152,10 @@ void cmdListCallback(cmd* c) {
   Serial.println(pwmMax);
   Serial.print("Plot: ");
   Serial.println(plot ? "Enabled" : "Disabled");
+  Serial.print("Sampling Time (ts): ");
+  Serial.println(ts);
+  Serial.print("Firmware Version: ");
+  Serial.println(firmwareVersion);
   Serial.print("Encoder1 Position: ");
   Serial.println(encoder1Position);
   Serial.print("Encoder1 Velocity: ");
@@ -162,7 +171,6 @@ void cmdModeCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     int value = cmd.getArgument(0).getValue().toInt();
     mode = (value > 0) ? 1 : 0;
     Serial.print("Mode set to: ");
@@ -176,7 +184,6 @@ void cmdPwmCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     int value = cmd.getArgument(0).getValue().toInt();
     value = constrain(value, 0, pwmMax);
     pwmESC = value;
@@ -192,7 +199,6 @@ void cmdDirCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     int value = cmd.getArgument(0).getValue().toInt();
     dir = (value > 0) ? 1 : 0;
     digitalWrite(dirPin, dir > 0 ? HIGH : LOW);
@@ -207,7 +213,6 @@ void cmdPwmMaxCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     int value = cmd.getArgument(0).getValue().toInt();
     if (value < 100) {
       Serial.println("Error: 'pwm_max' must be at least 100.");
@@ -225,8 +230,7 @@ void cmdRefCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
-    int value = cmd.getArgument(0).getValue().toFloat();
+    float value = cmd.getArgument(0).getValue().toFloat();
     value = constrain(value, -10.0, 10.0);
     ref = value;
     Serial.print("Reference Velocity set to: ");
@@ -240,7 +244,6 @@ void cmdKpCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     float value = cmd.getArgument(0).getValue().toFloat();
     value = constrain(value, 0.0, 100.0);
     Kp = value;
@@ -255,7 +258,6 @@ void cmdKiCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     float value = cmd.getArgument(0).getValue().toFloat();
     value = constrain(value, 0.0, 100.0);
     Ki = value;
@@ -270,7 +272,6 @@ void cmdKdCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     float value = cmd.getArgument(0).getValue().toFloat();
     value = constrain(value, 0.0, 100.0);
     Kd = value;
@@ -285,7 +286,6 @@ void cmdPlotCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
   if (argNum > 0) {
-    // Get the first argument
     int value = cmd.getArgument(0).getValue().toInt();
     plot = (value > 0) ? true : false;
     Serial.print("Plotting ");
@@ -293,6 +293,30 @@ void cmdPlotCallback(cmd* c) {
   } else {
     Serial.println("Error: 'plot' command requires a parameter (0 or 1).");
   }
+}
+
+// New command callback to set sampling time (ts)
+void cmdTsCallback(cmd* c) {
+  Command cmd(c);
+  int argNum = cmd.countArgs();
+  if (argNum > 0) {
+    int value = cmd.getArgument(0).getValue().toInt();
+    if (value < 1) {
+      Serial.println("Error: ts must be at least 1 ms.");
+      return;
+    }
+    ts = value;
+    Serial.print("Sampling time (ts) set to: ");
+    Serial.println(ts);
+  } else {
+    Serial.println("Error: 'ts' command requires a parameter.");
+  }
+}
+
+// New command callback to fetch firmware version
+void cmdVersionCallback(cmd* c) {
+  Serial.print("Firmware Version: ");
+  Serial.println(firmwareVersion);
 }
 
 // FreeRTOS Tasks
@@ -304,40 +328,38 @@ void cliTask(void *pvParameters) {
       String input = Serial.readStringUntil('\n');
       cli.parse(input);
     }
-    vTaskDelay(10 / portTICK_PERIOD_MS); // Short delay to yield CPU
+    vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
 
 void displayTask(void *pvParameters) {
-  char buffer[30];  // Buffer for display strings
-  int lineHeight = 15; // Line height for Font 3
+  char buffer[30];
+  int lineHeight = 15;
   int leftColumnX = 0;
   int rightColumnX = 50;
   int parametersColumnX = 130;
   int valuesColumnX = 180;
 
-  // Set the font and text color once outside the loop
-  tft.setTextFont(2); // Font 2
-  tft.setTextColor(TFT_WHITE, TFT_BLACK); // White text on black background
+  tft.setTextFont(2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
   while (1) {
     int yPosition = 0;
+    tft.fillScreen(TFT_BLACK); // Clear screen before update
 
-    // Row 1: Enc1 | Vel1
+    // Row 1: Encoder 1 & Velocity 1
     tft.drawString("Enc1:", leftColumnX, yPosition);
     sprintf(buffer, "%ld", encoder1Position);
     tft.drawString(buffer, rightColumnX, yPosition);
-
     tft.drawString("Vel1:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", encoder1Velocity);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 2: Enc2 | Vel2
+    // Row 2: Encoder 2 & Velocity 2
     tft.drawString("Enc2:", leftColumnX, yPosition);
     sprintf(buffer, "%ld", encoder2Position);
     tft.drawString(buffer, rightColumnX, yPosition);
-
     tft.drawString("Vel2:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", encoder2Velocity);
     tft.drawString(buffer, valuesColumnX, yPosition);
@@ -346,60 +368,59 @@ void displayTask(void *pvParameters) {
     // Blank row
     yPosition += lineHeight;
 
-    // Row 4: Mode | Ref
+    // Row 4: Mode & Reference
     tft.drawString("Mode:", leftColumnX, yPosition);
     tft.drawString(mode == 0 ? "Open" : "Close", rightColumnX, yPosition);
-
     tft.drawString("Ref:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", ref);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 5: State | Kp
+    // Row 5: State & Kp
     tft.drawString("State:", leftColumnX, yPosition);
     tft.drawString(state == 0 ? "Stop" : "Run", rightColumnX, yPosition);
-
     tft.drawString("Kp:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", Kp);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 6: PWM | Ki
+    // Row 6: PWM & Ki
     tft.drawString("PWM:", leftColumnX, yPosition);
     sprintf(buffer, "%d", pwmESC);
     tft.drawString(buffer, rightColumnX, yPosition);
-
     tft.drawString("Ki:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", Ki);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 7: Dir | Kd
+    // Row 7: Direction & Kd
     tft.drawString("Dir:", leftColumnX, yPosition);
     tft.drawString(dir == 0 ? "Fwd" : "Rvr", rightColumnX, yPosition);
-
     tft.drawString("Kd:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", Kd);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 8: PWM Max
+    // Row 8: Error contributions
     tft.drawString("eP: ", leftColumnX, yPosition);
     sprintf(buffer, "%.2f", Kp * error);
     tft.drawString(buffer, rightColumnX, yPosition);
-
     tft.drawString("eI:", parametersColumnX, yPosition);
     sprintf(buffer, "%.2f", Ki * integral);
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // Row 9: Plot
+    // // Row 9: Sampling Time and Firmware Version
+    // tft.drawString("ts:", leftColumnX, yPosition);
+    // sprintf(buffer, "%d", ts);
+    // tft.drawString(buffer, rightColumnX, yPosition);
+    // tft.drawString("FW:", parametersColumnX, yPosition);
+    // tft.drawString(firmwareVersion, valuesColumnX, yPosition);
+    // yPosition += lineHeight;
 
-    // Delay before updating display
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
-
 
 // Task to send encoder data over Serial
 void sendEncoderData(void *pvParameters) {
@@ -417,57 +438,40 @@ void sendEncoderData(void *pvParameters) {
   }
 }
 
-// Task to calculate velocities and handle control logic every 100 ms
+// Task to calculate velocities and handle control logic every ts ms
 void controlAndVelocityTask(void *pvParameters) {
-  const TickType_t xFrequency = pdMS_TO_TICKS(ts); // 100 ms
+  const TickType_t xFrequency = pdMS_TO_TICKS(ts);
   TickType_t xLastWakeTime = xTaskGetTickCount();
   long lastEncoder1Position = 0;
   long lastEncoder2Position = 0;
 
   while (1) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
+    
     // Calculate Velocity1
     long currentEnc1 = encoder1Position;
     float deltaEnc1 = currentEnc1 - lastEncoder1Position;
-    // Assuming counts per second scaling factor; adjust as needed
-    float rawVelocity1 = deltaEnc1 / 4096.0 * 10.0; // Example scaling
+    float rawVelocity1 = deltaEnc1 / 4096.0 * 10.0;
     encoder1Velocity = alpha * rawVelocity1 + (1 - alpha) * encoder1Velocity;
     lastEncoder1Position = currentEnc1;
 
     // Calculate Velocity2
     long currentEnc2 = encoder2Position;
     float deltaEnc2 = currentEnc2 - lastEncoder2Position;
-    // Assuming counts per second scaling factor; adjust as needed
-    float rawVelocity2 = deltaEnc2 / 48.0 / 20.4 * 10.0; // Example scaling
+    float rawVelocity2 = deltaEnc2 / 48.0 / 20.4 * 10.0;
     encoder2Velocity = alpha * rawVelocity2 + (1 - alpha) * encoder2Velocity;
     lastEncoder2Position = currentEnc2;
 
     // Control Logic
     if (mode == 1 && state == 1) { // Closed-loop and Running
-      // Calculate error
       error = ref - encoder1Velocity;
-
-      // Integrate error
-      integral += error * 0.1; // Assuming control interval is 100 ms
-
-      // Derivative of error
-      float derivative = (error - previousError) / 0.1; // Assuming control interval is 100 ms
-
-      // Compute PID output
+      integral += error * (ts / 1000.0);
+      float derivative = (error - previousError) / (ts / 1000.0);
       float output = Kp * error + Ki * integral + Kd * derivative;
-
-      //Constrain output to +-100.0
       output = constrain(output, -100.0, 100.0);
-      
-      //Scale output to PWM range
-      pwmESC = int(output * 40.0); // Assuming 40.0 is the scaling factor
-
-      // Set PWM and Direction
+      pwmESC = int(output * 40.0);
       ledcWrite(pwmPin, pwmESC);
       digitalWrite(dirPin, output < 0.0 ? HIGH : LOW);
-
-      // Optional: Plotting
       if (plot) {
         Serial.print(pwmESC);
         Serial.print(" ");
@@ -475,15 +479,10 @@ void controlAndVelocityTask(void *pvParameters) {
         Serial.print(" ");
         Serial.println(encoder1Velocity);
       }
-
-      // Update previous error
       previousError = error;
     } else if (mode == 0 && state == 1) { // Open-loop and Running
-      // Open-loop control (PWM set via CLI)
       ledcWrite(pwmPin, pwmESC);
       digitalWrite(dirPin, dir);
-
-      // Optional: Plotting
       if (plot) {
         Serial.print(pwmESC);
         Serial.print(" ");
@@ -498,16 +497,12 @@ void controlAndVelocityTask(void *pvParameters) {
 }
 
 void setup() {
-  // Initialize Serial
   Serial.begin(115200);
   
   // Initialize TFT
   tft.init();
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
-  // tft.setTextSize(2); // Remove or replace with setFreeFont()
-  // Optionally set a free font
-  // tft.setFreeFont(&FreeSans12pt7b); // Example: FreeSans 12pt font
 
   // Initialize Encoder Pins with Pull-up resistors
   pinMode(encoder1PinA, INPUT_PULLUP);
@@ -523,8 +518,8 @@ void setup() {
   // Initialize PWM
   ledcAttach(pwmPin, pwmFrequency, pwmResolution);
   pinMode(dirPin, OUTPUT);
-  ledcWrite(pwmPin, 0); // Initialize PWM to 0
-  digitalWrite(dirPin, LOW); // Initialize direction
+  ledcWrite(pwmPin, 0);
+  digitalWrite(dirPin, LOW);
 
   // Initialize SimpleCLI
   cli.setOnError(errorCallback);
@@ -541,6 +536,10 @@ void setup() {
   cmdKd = cli.addSingleArgCmd("kd", cmdKdCallback);
   cmdPwmMax = cli.addSingleArgCmd("pwm_max", cmdPwmMaxCallback);
   cmdPlot = cli.addSingleArgCmd("plot", cmdPlotCallback);
+  
+  // Register new commands
+  cmdTs = cli.addSingleArgCmd("ts", cmdTsCallback);
+  cmdVersion = cli.addCmd("version", cmdVersionCallback);
 
   // Create FreeRTOS Tasks
   xTaskCreate(displayTask, "Display Task", 4096, NULL, 2, NULL);
@@ -548,7 +547,6 @@ void setup() {
   xTaskCreate(sendEncoderData, "Send Data", 2048, NULL, 1, NULL);
   xTaskCreate(controlAndVelocityTask, "Calculate Velocity and control task", 2048, NULL, 1, NULL);
 
-  //Message to serial device that controller is now ready to
   Serial.println("READY");
 }
 
