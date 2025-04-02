@@ -9,7 +9,7 @@
 TFT_eSPI tft = TFT_eSPI();  
 
 // PWM and Direction Pins
-const int pwmFrequency = 100;
+const int pwmFrequency = 10000;
 const int pwmResolution = 12;
 const int pwmPin = 26;
 const int dirPin = 25;
