@@ -438,7 +438,6 @@ void sendEncoderData(void *pvParameters) {
   }
 }
 
-// Task to calculate velocities and handle control logic every ts ms
 void controlAndVelocityTask(void *pvParameters) {
   const TickType_t xFrequency = pdMS_TO_TICKS(ts);
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -447,31 +446,49 @@ void controlAndVelocityTask(void *pvParameters) {
 
   while (1) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    
-    // Calculate Velocity1
+
+    // --- Velocity Calculation ---
     long currentEnc1 = encoder1Position;
     float deltaEnc1 = currentEnc1 - lastEncoder1Position;
-    float rawVelocity1 = deltaEnc1 / 4096.0 * 10.0;
+    float rawVelocity1 = deltaEnc1 / 4096.0 * 10.0;  // Adjust based on your encoder spec
     encoder1Velocity = alpha * rawVelocity1 + (1 - alpha) * encoder1Velocity;
     lastEncoder1Position = currentEnc1;
 
-    // Calculate Velocity2
     long currentEnc2 = encoder2Position;
     float deltaEnc2 = currentEnc2 - lastEncoder2Position;
-    float rawVelocity2 = deltaEnc2 / 48.0 / 20.4 * 10.0;
+    float rawVelocity2 = deltaEnc2 / 48.0 / 20.4 * 10.0;  // Adjust based on encoder+gearbox
     encoder2Velocity = alpha * rawVelocity2 + (1 - alpha) * encoder2Velocity;
     lastEncoder2Position = currentEnc2;
 
-    // Control Logic
-    if (mode == 1 && state == 1) { // Closed-loop and Running
+    // --- Control Logic ---
+    if (mode == 1 && state == 1) {  // Closed-loop and Running
+      float dt = ts / 1000.0;
       error = ref - encoder1Velocity;
-      integral += error * (ts / 1000.0);
-      float derivative = (error - previousError) / (ts / 1000.0);
-      float output = Kp * error + Ki * integral + Kd * derivative;
+      float derivative = (error - previousError) / dt;
+
+      // Compute predicted output
+      float outputBeforeSaturation = Kp * error + Ki * integral + Kd * derivative;
+      float output = outputBeforeSaturation;
+
+      // Conditional integration for anti-windup
+      if (output > 100.0) {
+        output = 100.0;
+        if (error < 0) integral += error * dt;  // Integrate only if it helps reduce output
+      } else if (output < -100.0) {
+        output = -100.0;
+        if (error > 0) integral += error * dt;
+      } else {
+        integral += error * dt;
+      }
+
+      // Recompute output with possibly updated integral
+      output = Kp * error + Ki * integral + Kd * derivative;
       output = constrain(output, -100.0, 100.0);
-      pwmESC = int(output * 40.0);
+
+      pwmESC = int(abs(output) * 40.0);  // Scale [-100..100] to PWM [0..4000]
       ledcWrite(pwmPin, pwmESC);
       digitalWrite(dirPin, output < 0.0 ? HIGH : LOW);
+
       if (plot) {
         Serial.print(pwmESC);
         Serial.print(" ");
@@ -479,22 +496,25 @@ void controlAndVelocityTask(void *pvParameters) {
         Serial.print(" ");
         Serial.println(encoder1Velocity);
       }
+
       previousError = error;
-    } else if (mode == 0 && state == 1) { // Open-loop and Running
+
+    } else if (mode == 0 && state == 1) {  // Open-loop and Running
       ledcWrite(pwmPin, pwmESC);
       digitalWrite(dirPin, dir);
       if (plot) {
         Serial.print(pwmESC);
         Serial.print(" ");
-        Serial.print(encoder1Velocity);
-        Serial.println();
+        Serial.println(encoder1Velocity);
       }
-    } else { // Stopped
+
+    } else {  // Stopped
       ledcWrite(pwmPin, 0);
       digitalWrite(dirPin, LOW);
     }
   }
 }
+
 
 void setup() {
   Serial.begin(115200);
