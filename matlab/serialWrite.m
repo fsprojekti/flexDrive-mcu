@@ -12,7 +12,7 @@ function setup(block)
     block.InputPort(1).Complexity = 'Real';
     block.InputPort(1).DirectFeedthrough = true;
     
-    block.SampleTimes = [1 0];  % match the read block's sample time (or adjust as needed)
+    block.SampleTimes = [0.01 0];  % match the read block's sample time (or adjust as needed)
     block.SimStateCompliance = 'DefaultSimState';
     
     block.RegBlockMethod('Start', @Start);
