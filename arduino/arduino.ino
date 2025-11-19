@@ -31,8 +31,8 @@ float encoder2Velocity = 0.0;
 // Sampling time in ms
 int ts = 10;
 
-// Filter Constant for Velocity Calculation
-const float alpha = 0.25;  // Higher value = less filtering, Lower value = more filtering
+// Filter Constant for Velocity Calculation (NOW RUNTIME-SETTABLE)
+float alpha = 0.05f;  // Higher value = less filtering, Lower value = more filtering
 
 // Firmware version
 const char* firmwareVersion = "1.0.0";
@@ -52,8 +52,12 @@ Command cmdKi;
 Command cmdKd;
 Command cmdPwmMax;
 Command cmdPlot;
-Command cmdTs;       // New command: set sampling time
-Command cmdVersion;  // New command: fetch firmware version
+Command cmdTs;          // set sampling time
+Command cmdVersion;     // fetch firmware version
+Command cmdPlotSerialOpen;
+Command cmdPlotSerialClosed;
+Command cmdPlotPeriod;  // set plot period multiplier
+Command cmdAlpha;       // NEW: set alpha
 
 // Control Variables
 int mode = 0;        // 0 - Open loop, 1 - Closed loop
@@ -65,7 +69,14 @@ float Kp = 0.1;      // Proportional gain
 float Ki = 0.0;      // Integral gain
 float Kd = 0.0;      // Derivative gain
 int pwmMax = 4000;   // Maximum PWM value
-bool plot = false;   // Plotting flag
+bool plot = false;   // OLD plotting flag (kept)
+
+// plot mode for Arduino Serial Plotter
+// 0 = no special plot, 1 = open-loop (pwm, vel), 2 = closed-loop (pwm, ref, vel)
+int plotMode = 0;
+
+// plot period multiplier (plot every plotPeriod * ts)
+int plotPeriod = 1;
 
 // PID Control Variables
 float error = 0.0;
@@ -140,7 +151,7 @@ void cmdListCallback(cmd* c) {
   Serial.println(pwmESC);
   Serial.print("Dir: ");
   Serial.println(dir);
-  Serial.print("Reference: ");
+  Serial.print("Reference [turn/s]: ");
   Serial.println(ref);
   Serial.print("Kp: ");
   Serial.println(Kp);
@@ -148,21 +159,32 @@ void cmdListCallback(cmd* c) {
   Serial.println(Ki);
   Serial.print("Kd: ");
   Serial.println(Kd);
+  Serial.print("Alpha (velocity filter): ");
+  Serial.println(alpha);
   Serial.print("PWM Max: ");
   Serial.println(pwmMax);
-  Serial.print("Plot: ");
+  Serial.print("Plot (old): ");
   Serial.println(plot ? "Enabled" : "Disabled");
-  Serial.print("Sampling Time (ts): ");
+  Serial.print("Sampling Time (ts) [ms]: ");
   Serial.println(ts);
+  Serial.print("Plot Period: ");
+  Serial.print(plotPeriod);
+  Serial.print(" (effective plot dt = ");
+  Serial.print(ts * plotPeriod);
+  Serial.println(" ms)");
+  Serial.print("Serial Plot Mode: ");
+  if (plotMode == 0) Serial.println("Off");
+  else if (plotMode == 1) Serial.println("Open Loop (pwm, vel)");
+  else if (plotMode == 2) Serial.println("Closed Loop (pwm, ref, vel)");
   Serial.print("Firmware Version: ");
   Serial.println(firmwareVersion);
   Serial.print("Encoder1 Position: ");
   Serial.println(encoder1Position);
-  Serial.print("Encoder1 Velocity: ");
+  Serial.print("Encoder1 Velocity [turn/s]: ");
   Serial.println(encoder1Velocity);
   Serial.print("Encoder2 Position: ");
   Serial.println(encoder2Position);
-  Serial.print("Encoder2 Velocity: ");
+  Serial.print("Encoder2 Velocity [turn/s]: ");
   Serial.println(encoder2Velocity);
   Serial.println("-------------------------");
 }
@@ -245,7 +267,8 @@ void cmdKpCallback(cmd* c) {
   int argNum = cmd.countArgs();
   if (argNum > 0) {
     float value = cmd.getArgument(0).getValue().toFloat();
-    value = constrain(value, 0.0, 100.0);
+    // NEW: allow negative Kp, range -1000 .. 1000
+    value = constrain(value, -1000.0f, 1000.0f);
     Kp = value;
     Serial.print("Kp set to: ");
     Serial.println(Kp);
@@ -288,14 +311,14 @@ void cmdPlotCallback(cmd* c) {
   if (argNum > 0) {
     int value = cmd.getArgument(0).getValue().toInt();
     plot = (value > 0) ? true : false;
-    Serial.print("Plotting ");
+    Serial.print("Old plotting ");
     Serial.println(plot ? "Enabled." : "Disabled.");
   } else {
     Serial.println("Error: 'plot' command requires a parameter (0 or 1).");
   }
 }
 
-// New command callback to set sampling time (ts)
+// Set sampling time (ts)
 void cmdTsCallback(cmd* c) {
   Command cmd(c);
   int argNum = cmd.countArgs();
@@ -307,16 +330,68 @@ void cmdTsCallback(cmd* c) {
     }
     ts = value;
     Serial.print("Sampling time (ts) set to: ");
-    Serial.println(ts);
+    Serial.print(ts);
+    Serial.println(" ms");
   } else {
     Serial.println("Error: 'ts' command requires a parameter.");
   }
 }
 
-// New command callback to fetch firmware version
+// Fetch firmware version
 void cmdVersionCallback(cmd* c) {
   Serial.print("Firmware Version: ");
   Serial.println(firmwareVersion);
+}
+
+// Serial Plotter commands
+void cmdPlotSerialOpenCallback(cmd* c) {
+  plotMode = 1;
+  Serial.println("Serial Plot Mode set to OPEN LOOP (pwm, vel).");
+}
+
+void cmdPlotSerialClosedCallback(cmd* c) {
+  plotMode = 2;
+  Serial.println("Serial Plot Mode set to CLOSED LOOP (pwm, ref, vel).");
+}
+
+// set plot period (multiplier of ts)
+void cmdPlotPeriodCallback(cmd* c) {
+  Command cmd(c);
+  int argNum = cmd.countArgs();
+  if (argNum > 0) {
+    int value = cmd.getArgument(0).getValue().toInt();
+    if (value < 1) {
+      Serial.println("Error: 'plot_period' must be >= 1.");
+      return;
+    }
+    plotPeriod = value;
+    Serial.print("Plot period set to: ");
+    Serial.print(plotPeriod);
+    Serial.print(" (effective dt = ");
+    Serial.print(ts * plotPeriod);
+    Serial.println(" ms)");
+  } else {
+    Serial.println("Error: 'plot_period' command requires a parameter.");
+  }
+}
+
+// NEW: set alpha for velocity filtering
+void cmdAlphaCallback(cmd* c) {
+  Command cmd(c);
+  int argNum = cmd.countArgs();
+  if (argNum > 0) {
+    float value = cmd.getArgument(0).getValue().toFloat();
+    // constrain to sensible range [0,1]
+    if (value < 0.0f || value > 1.0f) {
+      Serial.println("Error: 'alpha' must be between 0.0 and 1.0.");
+      return;
+    }
+    alpha = value;
+    Serial.print("Alpha set to: ");
+    Serial.println(alpha);
+  } else {
+    Serial.println("Error: 'alpha' command requires a parameter.");
+  }
 }
 
 // FreeRTOS Tasks
@@ -410,19 +485,11 @@ void displayTask(void *pvParameters) {
     tft.drawString(buffer, valuesColumnX, yPosition);
     yPosition += lineHeight;
 
-    // // Row 9: Sampling Time and Firmware Version
-    // tft.drawString("ts:", leftColumnX, yPosition);
-    // sprintf(buffer, "%d", ts);
-    // tft.drawString(buffer, rightColumnX, yPosition);
-    // tft.drawString("FW:", parametersColumnX, yPosition);
-    // tft.drawString(firmwareVersion, valuesColumnX, yPosition);
-    // yPosition += lineHeight;
-
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
-// Task to send encoder data over Serial
+// Task to send encoder data over Serial (OLD plotting, preserved)
 void sendEncoderData(void *pvParameters) {
   while (1) {
     if (plot) {
@@ -443,6 +510,7 @@ void controlAndVelocityTask(void *pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   long lastEncoder1Position = 0;
   long lastEncoder2Position = 0;
+  int plotCounter = 0;
 
   while (1) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -450,19 +518,31 @@ void controlAndVelocityTask(void *pvParameters) {
     // --- Velocity Calculation ---
     long currentEnc1 = encoder1Position;
     float deltaEnc1 = currentEnc1 - lastEncoder1Position;
-    float rawVelocity1 = deltaEnc1 / 4096.0 * 10.0;  // Adjust based on your encoder spec
-    encoder1Velocity = alpha * rawVelocity1 + (1 - alpha) * encoder1Velocity;
+
+    // Sample frequency from ts [ms] -> [Hz]
+    float sampleFreq = 1000.0f / (float)ts;
+
+    // Encoder 1: 4096 counts per revolution
+    float rawVelocity1 = deltaEnc1 / 4096.0f * sampleFreq;  // [turn/s]
+    encoder1Velocity = alpha * rawVelocity1 + (1.0f - alpha) * encoder1Velocity;
     lastEncoder1Position = currentEnc1;
 
     long currentEnc2 = encoder2Position;
     float deltaEnc2 = currentEnc2 - lastEncoder2Position;
-    float rawVelocity2 = deltaEnc2 / 48.0 / 20.4 * 10.0;  // Adjust based on encoder+gearbox
-    encoder2Velocity = alpha * rawVelocity2 + (1 - alpha) * encoder2Velocity;
+
+    // Encoder 2: example: 48 counts * 20.4 gear ratio (adjust to your hardware)
+    float rawVelocity2 = deltaEnc2 / 48.0f / 20.4f * sampleFreq;  // [turn/s]
+    encoder2Velocity = alpha * rawVelocity2 + (1.0f - alpha) * encoder2Velocity;
     lastEncoder2Position = currentEnc2;
+
+    // --- Compute whether we should plot this cycle ---
+    plotCounter++;
+    if (plotPeriod < 1) plotPeriod = 1; // safety
+    bool doPlotThisCycle = (plotCounter % plotPeriod == 0);
 
     // --- Control Logic ---
     if (mode == 1 && state == 1) {  // Closed-loop and Running
-      float dt = ts / 1000.0;
+      float dt = ts / 1000.0f;
       error = ref - encoder1Velocity;
       float derivative = (error - previousError) / dt;
 
@@ -471,29 +551,41 @@ void controlAndVelocityTask(void *pvParameters) {
       float output = outputBeforeSaturation;
 
       // Conditional integration for anti-windup
-      if (output > 100.0) {
-        output = 100.0;
-        if (error < 0) integral += error * dt;  // Integrate only if it helps reduce output
-      } else if (output < -100.0) {
-        output = -100.0;
-        if (error > 0) integral += error * dt;
+      if (output > 100.0f) {
+        output = 100.0f;
+        if (error < 0.0f) integral += error * dt;  // Integrate only if it helps reduce output
+      } else if (output < -100.0f) {
+        output = -100.0f;
+        if (error > 0.0f) integral += error * dt;
       } else {
         integral += error * dt;
       }
 
       // Recompute output with possibly updated integral
       output = Kp * error + Ki * integral + Kd * derivative;
-      output = constrain(output, -100.0, 100.0);
+      output = constrain(output, -100.0f, 100.0f);
 
-      pwmESC = int(abs(output) * 40.0);  // Scale [-100..100] to PWM [0..4000]
+      pwmESC = int(abs(output) * 40.0f);  // Scale [-100..100] to PWM [0..4000]
       ledcWrite(pwmPin, pwmESC);
-      digitalWrite(dirPin, output < 0.0 ? HIGH : LOW);
+      digitalWrite(dirPin, output < 0.0f ? HIGH : LOW);
 
-      if (plot) {
+      // OLD plotting (preserved), throttled by plotPeriod
+      if (plot && doPlotThisCycle) {
         Serial.print(pwmESC);
         Serial.print(" ");
         Serial.print(ref);
         Serial.print(" ");
+        Serial.println(encoder1Velocity);
+      }
+
+      // Arduino Serial Plotter format for CLOSED LOOP, throttled
+      if (plotMode == 2 && doPlotThisCycle) {
+        // Three series: pwm, ref, vel
+        Serial.print("pwm:");
+        Serial.print(pwmESC);
+        Serial.print(" ref:");
+        Serial.print(ref);
+        Serial.print(" vel:");
         Serial.println(encoder1Velocity);
       }
 
@@ -502,9 +594,20 @@ void controlAndVelocityTask(void *pvParameters) {
     } else if (mode == 0 && state == 1) {  // Open-loop and Running
       ledcWrite(pwmPin, pwmESC);
       digitalWrite(dirPin, dir);
-      if (plot) {
+
+      // OLD plotting (preserved), throttled by plotPeriod
+      if (plot && doPlotThisCycle) {
         Serial.print(pwmESC);
         Serial.print(" ");
+        Serial.println(encoder1Velocity);
+      }
+
+      // Arduino Serial Plotter format for OPEN LOOP, throttled
+      if (plotMode == 1 && doPlotThisCycle) {
+        // Two series: pwm, vel
+        Serial.print("pwm:");
+        Serial.print(pwmESC);
+        Serial.print(" vel:");
         Serial.println(encoder1Velocity);
       }
 
@@ -514,7 +617,6 @@ void controlAndVelocityTask(void *pvParameters) {
     }
   }
 }
-
 
 void setup() {
   Serial.begin(115200);
@@ -557,15 +659,19 @@ void setup() {
   cmdPwmMax = cli.addSingleArgCmd("pwm_max", cmdPwmMaxCallback);
   cmdPlot = cli.addSingleArgCmd("plot", cmdPlotCallback);
   
-  // Register new commands
+  // New commands
   cmdTs = cli.addSingleArgCmd("ts", cmdTsCallback);
   cmdVersion = cli.addCmd("version", cmdVersionCallback);
+  cmdPlotSerialOpen   = cli.addCmd("plotSerialOpen", cmdPlotSerialOpenCallback);
+  cmdPlotSerialClosed = cli.addCmd("plotSerialClosed", cmdPlotSerialClosedCallback);
+  cmdPlotPeriod       = cli.addSingleArgCmd("plot_period", cmdPlotPeriodCallback);
+  cmdAlpha            = cli.addSingleArgCmd("alpha", cmdAlphaCallback);
 
   // Create FreeRTOS Tasks
   xTaskCreate(displayTask, "Display Task", 4096, NULL, 2, NULL);
   xTaskCreate(cliTask, "CLI Task", 2048, NULL, 1, NULL);
   xTaskCreate(sendEncoderData, "Send Data", 2048, NULL, 1, NULL);
-  xTaskCreate(controlAndVelocityTask, "Calculate Velocity and control task", 2048, NULL, 1, NULL);
+  xTaskCreate(controlAndVelocityTask, "Calculate Velocity and control task", 4096, NULL, 1, NULL);
 
   Serial.println("READY");
 }
