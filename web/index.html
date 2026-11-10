@@ -1,0 +1,1536 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flexDrive monitor</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1a1d21; --muted: #5f6873;
+    --border: #dfe3e8; --grid: #eceff2; --axis: #9aa3ad;
+    --accent: #1f6feb; --accent-text: #ffffff;
+    --s1: #1f6feb; --s2: #d9480f; --ref: #6e7781; --u: #8250df;
+    --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --bad-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --text: #e6e9ed; --muted: #949ca7;
+      --border: #2a3038; --grid: #222830; --axis: #5d6670;
+      --accent: #4493f8; --accent-text: #0f1216;
+      --s1: #4493f8; --s2: #f0883e; --ref: #9aa3ad; --u: #a371f7;
+      --ok: #3fb950; --warn: #d29922; --bad: #f85149; --bad-text: #0f1216;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  section[data-tab] { display: grid; gap: 16px; }
+  section[data-tab][hidden] { display: none; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  h1 { font-size: 20px; margin: 0 auto 0 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); font-size: 13px; color: var(--muted);
+  }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--axis); }
+  .pill.ok::before { background: var(--ok); }
+  .pill.warn::before { background: var(--warn); }
+
+  button, input[type=text], input[type=number] {
+    font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--axis); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.danger { background: var(--bad); border-color: var(--bad); color: var(--bad-text); font-weight: 600; }
+  input[type=number] { width: 90px; font-variant-numeric: tabular-nums; }
+  input[type=text] { font-variant-numeric: tabular-nums; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input[type=range] { accent-color: var(--accent); }
+
+  .note {
+    padding: 12px 16px; border-radius: 8px; font-size: 14px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  }
+  .note b { color: var(--text); font-weight: 600; }
+  .est { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 4px; }
+  .banner { padding: 12px 16px; border-radius: 8px; border: 1px solid var(--bad); color: var(--bad); background: var(--panel); }
+  .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  .meta b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    border: 0; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted);
+    padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* motor bar */
+  .motor { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .motor input[type=range] { flex: 1 1 220px; min-width: 160px; }
+  .motor .actual { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* monitor */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card h2 { margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .card h2 small { font-weight: 400; color: var(--muted); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+  .big { font-size: 40px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .big .unit { font-size: 16px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 10px 0 0; font-size: 14px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  dd.alert { color: var(--bad); }
+
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .chart-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 8px; }
+  .chart-head h2 { margin-right: auto; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+  .legend label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent); color: var(--accent-text); }
+  .ls { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+  .ls.dash { border-top-style: dashed; }
+  .ls.dot { border-top-style: dotted; }
+  .ls.thin { border-top-width: 1px; opacity: 0.6; }
+  canvas { width: 100%; height: 280px; display: block; touch-action: none; user-select: none; }
+  .chart-help { margin-top: -6px; }
+  canvas.short { height: 120px; }
+
+  /* tuning */
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  .field input[type=text] { width: 100%; }
+  .param { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 10px; font-size: 14px; }
+  .param label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.err { color: var(--bad); }
+  .status.ok { color: var(--ok); }
+  table.metrics { border-collapse: collapse; font-size: 14px; width: 100%; font-variant-numeric: tabular-nums; }
+  table.metrics th, table.metrics td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--border); }
+  table.metrics th:first-child, table.metrics td:first-child { text-align: left; }
+  table.metrics th { font-weight: 500; color: var(--muted); font-size: 13px; }
+
+  details summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  .log-tools { display: flex; gap: 14px; align-items: center; margin: 10px 0 8px; font-size: 13px; color: var(--muted); }
+  .log {
+    height: 220px; overflow: auto; margin: 0; padding: 8px 10px; border-radius: 6px;
+    background: var(--bg); border: 1px solid var(--border);
+    font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+
+  @media (max-width: 600px) {
+    .big { font-size: 32px; }
+    canvas { height: 220px; }
+    .param { grid-template-columns: 90px 1fr 80px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>flexDrive <span>monitor</span></h1>
+    <span id="status" class="pill">Ni povezave</span>
+    <button id="btnConnect" class="primary">Poveži</button>
+    <button id="btnReset" disabled title="Ponovni zagon ESP32 (preko DTR/RTS)">Ponastavi ESP32</button>
+  </header>
+
+  <div id="unsupported" class="banner" hidden>
+    Ta brskalnik ne podpira Web Serial API. Uporabi namizni Chrome ali Edge.
+  </div>
+
+  <div class="meta">
+    <span>Firmware: <b id="fw">–</b></span>
+    <span>Vzorčenje: <b id="sampleMs">–</b></span>
+    <span>Telemetrija: <b id="rate">–</b></span>
+    <span>Observer: <b id="obsInfo">–</b></span>
+    <span>Čas naprave: <b id="devTime">–</b></span>
+  </div>
+
+  <!-- Motor control: always visible -->
+  <div class="panel motor">
+    <h2>Motor</h2>
+    <input type="range" id="pwmSlider" min="-4000" max="4000" step="10" value="0" disabled aria-label="PWM">
+    <input type="number" id="pwmInput" min="-4000" max="4000" step="10" value="0" disabled aria-label="PWM vrednost">
+    <span class="actual">dejanski PWM: <b id="pwmActual">–</b></span>
+    <button id="btnStop" class="danger" disabled title="Ustavi motor (tipka Esc)">STOP</button>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="monitor" class="on">Nadzor</button>
+    <button data-tab="tuning">Nastavljanje observerja</button>
+  </nav>
+
+  <!-- ===================================================================== -->
+  <section data-tab="monitor">
+    <div class="note">
+      <b>Hitrost ni izmerjena, ampak ocenjena.</b>
+      Maketa nima senzorja hitrosti, enkoderja merita samo pozicijo (kot). Hitrost zato na napravi
+      vsako milisekundo izračuna <b>Luenbergerjev observer</b> iz izmerjene pozicije; to je glavna vrednost
+      spodaj. Za primerjavo stran prikaže še <b>odvod pozicije</b>, izračunan v brskalniku.
+      Observer nastaviš v zavihku <i>Nastavljanje observerja</i>.
+    </div>
+
+    <div class="cards">
+      <div class="panel card">
+        <h2><span class="swatch" style="background:var(--s1)"></span>Enkoder 1 <small id="cpr1">4096 imp/obr</small></h2>
+        <div class="est">Hitrost · ocena observerja</div>
+        <div class="big"><span id="v1">–</span><span class="unit">obr/s</span></div>
+        <dl class="kv">
+          <dt>Ocena observerja</dt><dd><span id="rpm1">–</span> obr/min</dd>
+          <dt>Odvod pozicije (stran)</dt><dd><span id="pv1">–</span> obr/s</dd>
+          <dt>Kot</dt><dd><span id="deg1">–</span>°</dd>
+          <dt>Pozicija</dt><dd><span id="pos1">–</span> obr</dd>
+          <dt>Impulzi</dt><dd id="cnt1">–</dd>
+          <dt>Napake enkoderja</dt><dd id="err1">–</dd>
+        </dl>
+      </div>
+      <div class="panel card">
+        <h2><span class="swatch" style="background:var(--s2)"></span>Enkoder 2 <small id="cpr2">motor, 48 × 20,4</small></h2>
+        <div class="est">Hitrost · ocena observerja</div>
+        <div class="big"><span id="v2">–</span><span class="unit">obr/s</span></div>
+        <dl class="kv">
+          <dt>Ocena observerja</dt><dd><span id="rpm2">–</span> obr/min</dd>
+          <dt>Odvod pozicije (stran)</dt><dd><span id="pv2">–</span> obr/s</dd>
+          <dt>Kot</dt><dd><span id="deg2">–</span>°</dd>
+          <dt>Pozicija</dt><dd><span id="pos2">–</span> obr</dd>
+          <dt>Impulzi</dt><dd id="cnt2">–</dd>
+          <dt>Napake enkoderja</dt><dd id="err2">–</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <span>Časovno okno</span>
+      <div class="seg" id="winSel">
+        <button data-s="5">5 s</button>
+        <button data-s="10" class="on">10 s</button>
+        <button data-s="30">30 s</button>
+        <button data-s="60">60 s</button>
+      </div>
+      <button id="btnPause">Zamrzni</button>
+      <button id="btnMonReset" title="Samodejno merilo obeh osi (ali dvoklik na graf)">Samodejno merilo</button>
+    </div>
+    <p class="hint chart-help">
+      <b>Upravljanje grafov:</b> kolešček – povečava časa · Shift + kolešček – povečava osi Y ·
+      kolešček nad osjo – povečava te osi · vlečenje – premik (nad osjo samo ta os) ·
+      Shift + vlečenje – izbor območja · dvoklik – samodejno merilo.
+      Premik časa nazaj samodejno zamrzne prikaz; „Nadaljuj“ se vrne v živo.
+    </p>
+
+    <div class="panel">
+      <div class="chart-head">
+        <h2>Ocenjena hitrost [obr/s]</h2>
+        <div class="legend">
+          <label><input type="checkbox" id="velE1" checked><span class="swatch" style="background:var(--s1)"></span>Enkoder 1</label>
+          <label><input type="checkbox" id="velE2" checked><span class="swatch" style="background:var(--s2)"></span>Enkoder 2</label>
+          <span><span class="ls" style="color:var(--muted)"></span> observer</span>
+          <label title="Hitrost, ki jo izračuna spletna stran iz pozicij: (p(t) − p(t − okno)) / okno"><input type="checkbox" id="velRaw" checked><span class="ls dash" style="color:var(--muted)"></span>odvod pozicije (stran)</label>
+        </div>
+        <div class="seg" id="pvWin" title="Okno odvajanja pozicije: daljše okno = manj šuma, a večja zakasnitev (≈ pol okna)">
+          <button data-ms="20">20 ms</button>
+          <button data-ms="60">60 ms</button>
+          <button data-ms="100" class="on">100 ms</button>
+          <button data-ms="200">200 ms</button>
+        </div>
+      </div>
+      <canvas id="chartVel"></canvas>
+    </div>
+
+    <div class="panel">
+      <div class="chart-head">
+        <h2>Kot [<span id="angUnitLabel">obr</span>]</h2>
+        <div class="legend">
+          <label><input type="checkbox" id="angE1" checked><span class="swatch" style="background:var(--s1)"></span>Enkoder 1</label>
+          <label><input type="checkbox" id="angE2" checked><span class="swatch" style="background:var(--s2)"></span>Enkoder 2</label>
+        </div>
+        <div class="seg" id="angUnit">
+          <button data-u="turn" class="on">obr</button>
+          <button data-u="deg">°</button>
+          <button data-u="rad">rad</button>
+        </div>
+      </div>
+      <canvas id="chartAng"></canvas>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section data-tab="tuning" hidden>
+    <div class="panel" style="display:grid;gap:12px">
+      <h2>1 · Test: PWM profil in zajem pri 1 kHz</h2>
+      <p class="hint">
+        Naprava med testom vsako milisekundo zabeleži impulze obeh enkoderjev, ki jih nato stran
+        obdela z observerjem pri poljubnih parametrih. Profil zapiši kot <code>čas[s]:PWM</code>, ločeno z vejicami.
+        Po koncu testa se motor vedno ustavi.
+      </p>
+      <div class="row">
+        <label class="field" style="flex:1 1 320px">PWM profil
+          <input type="text" id="tProfile" value="0.2:1500, 1.6:3000, 2.8:-2000, 4.0:0">
+        </label>
+        <label class="field">Trajanje [s]
+          <input type="number" id="tDuration" min="0.5" max="5" step="0.5" value="5">
+        </label>
+      </div>
+      <div class="row">
+        <button id="btnRunTest" class="primary" disabled>Zaženi test</button>
+        <button id="btnSaveCsv" disabled>Shrani CSV</button>
+        <label class="field" style="flex-direction:row;display:flex;align-items:center;gap:6px">
+          <button id="btnLoadCsv" type="button">Naloži CSV</button>
+          <input type="file" id="fileCsv" accept=".csv,text/csv" hidden>
+        </label>
+        <span class="status" id="tStatus"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="chart-head">
+        <h2>2 · Ocena hitrosti iz zajete pozicije [obr/s]</h2>
+        <div class="legend">
+          <label title="Observer z izbranimi parametri, izračunan iz zajetih impulzov"><input type="checkbox" id="cE1" checked><span class="swatch" style="background:var(--s1)"></span>Observer · enk. 1</label>
+          <label title="Observer z izbranimi parametri, izračunan iz zajetih impulzov"><input type="checkbox" id="cE2" checked><span class="swatch" style="background:var(--s2)"></span>Observer · enk. 2</label>
+          <label title="Ničelno-fazni Savitzky–Golay odvod enkoderja 1 (±4 ms) — brez zakasnitve, zato kot referenca"><input type="checkbox" id="cRef" checked><span class="ls dash" style="color:var(--ref)"></span>referenca</label>
+          <label title="Hitrost, ki jo je med zajemom izračunala naprava (parametri ob času zajema)"><input type="checkbox" id="cFw"><span class="ls thin" style="color:var(--muted)"></span>naprava</label>
+        </div>
+        <button id="btnZoomReset" title="Samodejno merilo (ali dvoklik na graf)">Samodejno merilo</button>
+      </div>
+      <canvas id="chartCap"></canvas>
+      <canvas id="chartCapU" class="short"></canvas>
+      <p class="hint chart-help">
+        Spodaj: PWM ukaz (skupna časovna os). Kolešček – povečava časa · Shift + kolešček – os Y ·
+        vlečenje – premik · Shift + vlečenje – izbor območja · dvoklik – samodejno merilo.
+      </p>
+    </div>
+
+    <div class="grid2">
+      <div class="panel" style="display:grid;gap:12px;align-content:start">
+        <h2>3 · Parametri observerja</h2>
+        <div class="param">
+          <label for="f1Num"><span class="swatch" style="background:var(--s1)"></span>f enk. 1 [Hz]</label>
+          <input type="range" id="f1Slider" min="0" max="1000" step="1">
+          <input type="number" id="f1Num" min="1" max="200" step="1" value="50">
+        </div>
+        <div class="param">
+          <label for="f2Num"><span class="swatch" style="background:var(--s2)"></span>f enk. 2 [Hz]</label>
+          <input type="range" id="f2Slider" min="0" max="1000" step="1">
+          <input type="number" id="f2Num" min="1" max="200" step="1" value="40">
+        </div>
+        <div class="param">
+          <label for="zNum">dušenje ζ</label>
+          <input type="range" id="zSlider" min="0.3" max="2" step="0.01" value="0.707">
+          <input type="number" id="zNum" min="0.3" max="2" step="0.01" value="0.707">
+        </div>
+        <table class="metrics">
+          <thead><tr><th>RMS napaka [obr/s]</th><th>sledenje</th><th>kvant. šum</th><th>skupaj</th></tr></thead>
+          <tbody>
+            <tr><td><span class="swatch" style="background:var(--s1)"></span> Enkoder 1</td><td id="m1t">–</td><td id="m1q">–</td><td id="m1a">–</td></tr>
+            <tr><td><span class="swatch" style="background:var(--s2)"></span> Enkoder 2</td><td id="m2t">–</td><td id="m2q">–</td><td id="m2a">–</td></tr>
+          </tbody>
+        </table>
+        <p class="hint">
+          <b>Sledenje</b>: zaostajanje za dejansko hitrostjo (raste z nižjo f).
+          <b>Kvant. šum</b>: šum zaradi končne ločljivosti enkoderja (raste z višjo f).
+          Oboje je izračunano na izmerjeni trajektoriji, kvantizirani na ločljivost posameznega enkoderja.
+        </p>
+        <div class="row">
+          <button id="btnSuggest" disabled title="Za vsak enkoder izbere najnižji f, pri katerem je skupna napaka največ 15 % nad minimumom">Predlagaj f</button>
+          <button id="btnApply" class="primary" disabled>Uporabi na napravi</button>
+          <span class="status" id="aStatus"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="chart-head">
+          <h2>4 · Napaka v odvisnosti od f</h2>
+          <div class="legend">
+            <span><span class="ls" style="color:var(--muted)"></span> skupaj</span>
+            <span><span class="ls dash" style="color:var(--muted)"></span> sledenje</span>
+            <span><span class="ls dot" style="color:var(--muted)"></span> kvant. šum</span>
+          </div>
+          <button id="btnSweepReset" title="Samodejno merilo (ali dvoklik na graf)">Samodejno</button>
+        </div>
+        <canvas id="chartSweep"></canvas>
+        <p class="hint">Navpični črti označujeta trenutno izbrani f. Optimum je tam, kjer je polna črta najnižje.</p>
+      </div>
+    </div>
+  </section>
+
+  <details class="panel" id="logPanel">
+    <summary>Serijski izpis</summary>
+    <div class="log-tools">
+      <label><input type="checkbox" id="logTel"> prikaži tudi telemetrijo</label>
+      <button id="btnClearLog">Počisti</button>
+    </div>
+    <pre class="log" id="log"></pre>
+  </details>
+</main>
+
+<script>
+"use strict";
+
+// ===========================================================================
+//  Constants & state
+// ===========================================================================
+const BAUD = 921600;
+const HISTORY_S = 60;
+const STALE_MS = 1000;
+const OBS_BW_MIN = 1, OBS_BW_MAX = 200, OBS_ZETA_MIN = 0.3, OBS_ZETA_MAX = 2;
+
+let port = null, reader = null, readLoopDone = null, keepReading = false;
+let writeChain = Promise.resolve();
+
+let info = null;
+let cpr = [4096, 48 * 20.4];
+let pwmMax = 4000;
+let latest = null, lastRxAt = 0, rxCount = 0;
+const history = [];            // {t [s], v1, v2 [turn/s, observer], a1, a2 [turn]}
+let posVelWinMs = 100;         // window for velocity-from-position computed in the browser
+
+let winSec = 10, paused = false, pausedEnd = 0, angleUnit = "turn";
+let activeTab = "monitor";
+let numbersDirty = false, chartsDirty = true, tuneDirty = false, sweepDirty = false;
+
+const logLines = [];
+let logDirty = false;
+
+const $ = id => document.getElementById(id);
+const on = id => $(id).checked;
+
+const ANGLE_UNITS = {
+  turn: { scale: 1, label: "obr" },
+  deg:  { scale: 360, label: "°" },
+  rad:  { scale: 2 * Math.PI, label: "rad" },
+};
+const angleScale = () => ANGLE_UNITS[angleUnit].scale;
+
+// ===========================================================================
+//  Serial connection
+// ===========================================================================
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: BAUD, bufferSize: 65536 });
+  } catch (e) {
+    if (e.name !== "NotFoundError") log(`Povezava ni uspela: ${e.message}`);
+    port = null;
+    return;
+  }
+  keepReading = true;
+  readLoopDone = readLoop();
+  setConnectedUi(true);
+  log("— povezano —");
+  send("tel 1");     // in case it was switched off from a serial terminal
+  send("info");
+}
+
+async function disconnect() {
+  if (port && port.writable) await send("stop");
+  keepReading = false;
+  if (reader) await reader.cancel().catch(() => {});
+  if (readLoopDone) await readLoopDone.catch(() => {});
+  if (port) await port.close().catch(() => {});
+  port = null;
+  test.running = false;
+  test.timers.forEach(clearTimeout);
+  test.timers = [];
+  capRx = null;
+  setConnectedUi(false);
+  log("— prekinjeno —");
+}
+
+async function readLoop() {
+  const decoder = new TextDecoder();
+  let pending = "";
+  while (port && port.readable && keepReading) {
+    reader = port.readable.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        let start = 0, nl;
+        while ((nl = pending.indexOf("\n", start)) >= 0) {
+          handleLine(pending.slice(start, nl).replace(/\r$/, ""));
+          start = nl + 1;
+        }
+        pending = pending.slice(start);
+        if (pending.length > 8192) pending = "";
+      }
+    } catch (e) {
+      if (keepReading) log(`Napaka pri branju: ${e.message}`);
+    } finally {
+      reader.releaseLock();
+      reader = null;
+    }
+  }
+}
+
+function send(text) {
+  writeChain = writeChain.then(async () => {
+    if (!port || !port.writable) return;
+    const w = port.writable.getWriter();
+    try { await w.write(new TextEncoder().encode(text + "\n")); }
+    finally { w.releaseLock(); }
+  }).catch(e => log(`Napaka pri pošiljanju: ${e.message}`));
+  return writeChain;
+}
+
+async function resetBoard() {
+  if (!port) return;
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await new Promise(r => setTimeout(r, 120));
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    log("— ponastavitev ESP32 —");
+  } catch (e) {
+    log(`Ponastavitev ni uspela: ${e.message}`);
+  }
+}
+
+// ===========================================================================
+//  Protocol
+// ===========================================================================
+let capRx = null;    // capture being received: {meta, rows: []}
+
+function handleLine(line) {
+  if (!line) return;
+  if (line[0] !== "{") {
+    if (capRx) { addCaptureRow(line); return; }
+    log(line);
+    return;
+  }
+  let msg;
+  try { msg = JSON.parse(line); } catch { log(line); return; }
+
+  switch (msg.type) {
+    case "tel":
+      onTelemetry(msg);
+      if (on("logTel")) log(line);
+      break;
+    case "info":      onInfo(msg); log(line); break;
+    case "cap_start": onCaptureStart(msg); log(line); break;
+    case "cap_begin": capRx = { meta: msg, rows: [] }; setTestStatus(`Prenašam podatke … 0 / ${msg.n}`); log(line); break;
+    case "cap_end":   onCaptureEnd(); log(line); break;
+    case "err":
+      log(line);
+      if (test.running || /capture|pwm/.test(msg.msg)) setTestStatus(`Napaka: ${msg.msg}`, "err");
+      if (test.running && /capture/.test(msg.msg)) {
+        test.running = false;
+        $("btnRunTest").disabled = !port;
+      }
+      if (/obs_/.test(msg.msg)) setApplyStatus(`Napaka: ${msg.msg}`, "err");
+      break;
+    default: log(line);
+  }
+}
+
+function asPair(v) {
+  return Array.isArray(v) ? v.map(Number) : [Number(v), Number(v)];
+}
+
+function onInfo(m) {
+  const prev = info;
+  info = m;
+  if (Array.isArray(m.cpr) && m.cpr.length >= 2) cpr = m.cpr.map(Number);
+  if (m.pwm_max) setPwmMax(m.pwm_max);
+  $("fw").textContent = `${m.fw ?? "?"} ${m.ver ?? ""}`.trim();
+  $("sampleMs").textContent = m.sample_ms != null ? `${m.sample_ms} ms (${fmtNum(1000 / m.sample_ms, 0)} Hz)` : "–";
+  $("cpr1").textContent = `${fmtNum(cpr[0], 0)} imp/obr`;
+  $("cpr2").textContent = `${fmtNum(cpr[1], 1)} imp/obr`;
+  if (m.obs_bw != null) {
+    const bw = asPair(m.obs_bw);
+    $("obsInfo").textContent = `${fmtNum(bw[0], 0)} / ${fmtNum(bw[1], 0)} Hz, ζ ${fmtNum(m.obs_zeta, 3)}`;
+    if (!prev) setTuneParams(bw[0], bw[1], m.obs_zeta);      // first contact: start from device values
+    else if (applyPending) {
+      applyPending = false;
+      setApplyStatus(`Na napravi: ${fmtNum(bw[0], 0)} / ${fmtNum(bw[1], 0)} Hz, ζ ${fmtNum(m.obs_zeta, 3)}`, "ok");
+    }
+  }
+}
+
+function onTelemetry(m) {
+  const t = m.t / 1000;
+  if (latest && m.t < latest.t) history.length = 0;
+  latest = m;
+  lastRxAt = performance.now();
+  rxCount++;
+  history.push({ t, v1: m.v1, v2: m.v2, a1: m.p1 / cpr[0], a2: m.p2 / cpr[1] });
+  const oldest = t - HISTORY_S;
+  let drop = 0;
+  while (drop < history.length && history[drop].t < oldest) drop++;
+  if (drop) history.splice(0, drop);
+  numbersDirty = true;
+  chartsDirty = true;
+}
+
+// ===========================================================================
+//  Motor
+// ===========================================================================
+let pwmTarget = 0, pwmSent = 0, pwmTimer = null;
+
+function setPwmMax(max) {
+  pwmMax = max;
+  for (const id of ["pwmSlider", "pwmInput"]) { $(id).min = -max; $(id).max = max; }
+}
+
+function requestPwm(v) {
+  v = Math.round(Math.max(-pwmMax, Math.min(pwmMax, Number(v) || 0)));
+  pwmTarget = v;
+  $("pwmSlider").value = v;
+  if (document.activeElement !== $("pwmInput")) $("pwmInput").value = v;
+  if (pwmTimer) return;                       // throttle to ~20 commands/s
+  const flush = () => {
+    pwmTimer = null;
+    if (pwmTarget !== pwmSent) { send(`pwm ${pwmTarget}`); pwmSent = pwmTarget; pwmTimer = setTimeout(flush, 50); }
+  };
+  flush();
+}
+
+function stopMotor() {
+  pwmTarget = 0; pwmSent = 0;
+  if (pwmTimer) { clearTimeout(pwmTimer); pwmTimer = null; }
+  $("pwmSlider").value = 0;
+  $("pwmInput").value = 0;
+  send("stop");
+}
+
+// ===========================================================================
+//  Tuning: test run & capture
+// ===========================================================================
+const test = { running: false, timers: [] };
+let capture = null;      // {meta, t:Float64Array [s], c:[Int32Array,..], vfw:[..], u:Int16Array}
+
+function parseProfile(text, duration) {
+  const steps = [];
+  for (const part of text.split(",").map(s => s.trim()).filter(Boolean)) {
+    const m = part.match(/^([0-9.]+)\s*:\s*(-?\d+)$/);
+    if (!m) throw new Error(`Neveljaven korak „${part}“ (pričakovano čas:PWM)`);
+    const t = Number(m[1]), u = Number(m[2]);
+    if (t >= duration) throw new Error(`Korak pri ${t} s je izven trajanja testa`);
+    if (Math.abs(u) > pwmMax) throw new Error(`PWM ${u} presega ±${pwmMax}`);
+    steps.push({ t, u });
+  }
+  return steps.sort((a, b) => a.t - b.t);
+}
+
+function runTest() {
+  if (test.running || !port) return;
+  const duration = Number($("tDuration").value);
+  const maxS = info && info.cap_max ? info.cap_max / 1000 : 5;
+  if (!(duration > 0 && duration <= maxS)) { setTestStatus(`Trajanje mora biti med 0 in ${maxS} s`, "err"); return; }
+  let steps;
+  try { steps = parseProfile($("tProfile").value, duration); }
+  catch (e) { setTestStatus(e.message, "err"); return; }
+
+  test.running = true;
+  test.steps = steps;
+  test.duration = duration;
+  $("btnRunTest").disabled = true;
+  setTestStatus("Začenjam …");
+  send(`capture ${Math.round(duration * 1000)}`);
+}
+
+function onCaptureStart() {
+  if (!test.running) return;
+  setTestStatus("Test teče …");
+  for (const s of test.steps) {
+    test.timers.push(setTimeout(() => {
+      send(`pwm ${s.u}`);
+      pwmSent = pwmTarget = s.u;
+      $("pwmSlider").value = s.u;
+      $("pwmInput").value = s.u;
+    }, s.t * 1000));
+  }
+  test.timers.push(setTimeout(() => stopMotor(), test.duration * 1000 + 50));
+}
+
+function addCaptureRow(line) {
+  const p = line.split(",");
+  if (p.length < 6) return;
+  capRx.rows.push(p.map(Number));
+  if (capRx.rows.length % 500 === 0) setTestStatus(`Prenašam podatke … ${capRx.rows.length} / ${capRx.meta.n}`);
+}
+
+function onCaptureEnd() {
+  const rx = capRx;
+  capRx = null;
+  test.timers.forEach(clearTimeout);
+  test.timers = [];
+  if (test.running) stopMotor();
+  test.running = false;
+  $("btnRunTest").disabled = !port;
+  if (!rx || rx.rows.length < 50) { setTestStatus("Zajem je prekratek", "err"); return; }
+  loadCapture(rx.meta, rx.rows);
+  setTestStatus(`Zajetih ${rx.rows.length} vzorcev`, "ok");
+}
+
+function loadCapture(meta, rows) {
+  const n = rows.length;
+  const c = { meta, n,
+    t: new Float64Array(n), c: [new Int32Array(n), new Int32Array(n)],
+    vfw: [new Float64Array(n), new Float64Array(n)], u: new Float64Array(n),
+    cpr: Array.isArray(meta.cpr) ? meta.cpr.map(Number) : cpr.slice() };
+  for (let k = 0; k < n; k++) {
+    const r = rows[k];
+    c.t[k] = r[0] * 1e-6;
+    c.c[0][k] = r[1]; c.c[1][k] = r[2];
+    c.vfw[0][k] = r[3]; c.vfw[1][k] = r[4];
+    c.u[k] = r[5];
+  }
+  prepareCapture(c);
+  capture = c;
+  resetGroup("cap");
+  $("btnSaveCsv").disabled = false;
+  $("btnSuggest").disabled = false;
+  tuneDirty = true;
+  sweepDirty = true;
+}
+
+// Reference velocity (zero-phase Savitzky–Golay derivative of encoder 1) and
+// synthetic count signals used to separate tracking error from quantization noise.
+function prepareCapture(c) {
+  const n = c.n, H = 4;
+  let den = 0;
+  for (let j = -H; j <= H; j++) den += j * j;
+  const vref = new Float64Array(n);
+  for (let k = H; k < n - H; k++) {
+    let s = 0;
+    for (let j = -H; j <= H; j++) s += j * c.c[0][k + j];
+    vref[k] = s / den / c.cpr[0] / ((c.t[k + H] - c.t[k - H]) / (2 * H));
+  }
+  for (let k = 0; k < H; k++) vref[k] = vref[H];
+  for (let k = n - H; k < n; k++) vref[k] = vref[n - H - 1];
+  const theta = new Float64Array(n);                 // [turn]
+  for (let k = 1; k < n; k++) theta[k] = theta[k - 1] + vref[k] * (c.t[k] - c.t[k - 1]);
+
+  c.vref = vref;
+  c.cont = [0, 1].map(i => theta.map(x => x * c.cpr[i]));                 // ideal (infinite resolution)
+  c.quant = c.cont.map(a => Float64Array.from(a, x => Math.floor(x + 0.37)));  // quantized like an encoder
+  c.idx0 = c.t.findIndex(x => x > 0.1);
+  c.idx1 = n - Math.max(1, Math.round(0.05 / ((c.t[n - 1] - c.t[0]) / n)));
+}
+
+// Luenberger observer, identical to firmware velocity_observer.cpp.
+function observerGains(dt, wn, zeta) {
+  const x = zeta * wn * dt, a0 = Math.exp(-2 * x);
+  const a1 = zeta < 1
+    ? -2 * Math.exp(-x) * Math.cos(wn * dt * Math.sqrt(1 - zeta * zeta))
+    : -2 * Math.exp(-x) * Math.cosh(wn * dt * Math.sqrt(zeta * zeta - 1));
+  return [1 - a0, 1 + a0 + a1];
+}
+
+function runObserver(meas, t, cprI, bw, zeta, out) {
+  const n = meas.length, wn = 2 * Math.PI * bw;
+  out = out || new Float64Array(n);
+  let e = 0, w = 0, ref = meas[0];
+  out[0] = 0;
+  for (let k = 1; k < n; k++) {
+    const dt = t[k] - t[k - 1];
+    if (dt <= 0) { out[k] = w / cprI; continue; }
+    const [al, be] = observerGains(dt, wn, zeta);
+    e += w * dt;
+    const z = meas[k] - ref, y = z - e;
+    e += al * y; w += be / dt * y;
+    e -= z; ref = meas[k];
+    out[k] = w / cprI;
+  }
+  return out;
+}
+
+function rmsDiff(a, b, i0, i1) {
+  let s = 0;
+  for (let k = i0; k < i1; k++) { const d = a[k] - b[k]; s += d * d; }
+  return Math.sqrt(s / (i1 - i0));
+}
+
+const scratch = { a: null, b: null };
+function metrics(c, i, bw, zeta) {
+  if (!scratch.a || scratch.a.length !== c.n) { scratch.a = new Float64Array(c.n); scratch.b = new Float64Array(c.n); }
+  const vc = runObserver(c.cont[i], c.t, c.cpr[i], bw, zeta, scratch.a);
+  const vq = runObserver(c.quant[i], c.t, c.cpr[i], bw, zeta, scratch.b);
+  return {
+    trk: rmsDiff(vc, c.vref, c.idx0, c.idx1),
+    qn:  rmsDiff(vq, vc, c.idx0, c.idx1),
+    tot: rmsDiff(vq, c.vref, c.idx0, c.idx1),
+  };
+}
+
+const SUGGEST_MARGIN = 0.15;
+const SWEEP_F = Array.from({ length: 41 }, (_, k) => 2 * Math.pow(100, k / 40));   // 2 .. 200 Hz
+let sweep = null;
+function computeSweep() {
+  if (!capture) { sweep = null; return; }
+  const z = tune.zeta;
+  sweep = [0, 1].map(i => {
+    const r = { trk: [], qn: [], tot: [] };
+    for (const f of SWEEP_F) { const m = metrics(capture, i, f, z); r.trk.push(m.trk); r.qn.push(m.qn); r.tot.push(m.tot); }
+    return r;
+  });
+}
+
+// ===========================================================================
+//  Tuning: parameters UI
+// ===========================================================================
+const tune = { f: [50, 40], zeta: 0.707 };
+let applyPending = false;
+
+const F_LOG_MAX = Math.log10(OBS_BW_MAX);
+const sliderToF = s => Math.pow(10, s / 1000 * F_LOG_MAX);
+const fToSlider = f => Math.round(Math.log10(Math.max(1, f)) / F_LOG_MAX * 1000);
+
+function setTuneParams(f1, f2, zeta) {
+  if (f1 != null) tune.f[0] = clamp(f1, OBS_BW_MIN, OBS_BW_MAX);
+  if (f2 != null) tune.f[1] = clamp(f2, OBS_BW_MIN, OBS_BW_MAX);
+  if (zeta != null) {
+    const zChanged = tune.zeta !== clamp(zeta, OBS_ZETA_MIN, OBS_ZETA_MAX);
+    tune.zeta = clamp(zeta, OBS_ZETA_MIN, OBS_ZETA_MAX);
+    if (zChanged) sweepDirty = true;
+  }
+  for (const i of [0, 1]) {
+    $(`f${i + 1}Slider`).value = fToSlider(tune.f[i]);
+    if (document.activeElement !== $(`f${i + 1}Num`)) $(`f${i + 1}Num`).value = fmtNum(tune.f[i], tune.f[i] < 10 ? 1 : 0);
+  }
+  $("zSlider").value = tune.zeta;
+  if (document.activeElement !== $("zNum")) $("zNum").value = tune.zeta;
+  tuneDirty = true;
+}
+
+function updateMetricsTable() {
+  for (const i of [0, 1]) {
+    const n = i + 1;
+    if (!capture) { for (const k of ["t", "q", "a"]) $(`m${n}${k}`).textContent = "–"; continue; }
+    const m = metrics(capture, i, tune.f[i], tune.zeta);
+    $(`m${n}t`).textContent = fmtNum(m.trk, 4);
+    $(`m${n}q`).textContent = fmtNum(m.qn, 4);
+    $(`m${n}a`).textContent = fmtNum(m.tot, 4);
+  }
+}
+
+function suggest() {
+  if (!capture) return;
+  if (sweepDirty || !sweep) { computeSweep(); sweepDirty = false; }
+  // The total-error curve is flat around its minimum; take the lowest f whose total
+  // error is within SUGGEST_MARGIN of the minimum -> nearly the same tracking, much less noise.
+  const best = sweep.map(r => {
+    const min = Math.min(...r.tot);
+    return SWEEP_F[r.tot.findIndex(v => v <= min * (1 + SUGGEST_MARGIN))];
+  });
+  setTuneParams(Math.round(best[0]), Math.round(best[1]), null);
+  setApplyStatus(`Predlog: ${Math.round(best[0])} / ${Math.round(best[1])} Hz (≤ ${SUGGEST_MARGIN * 100} % nad najmanjšo skupno napako)`, "");
+}
+
+function applyToDevice() {
+  if (!port) return;
+  applyPending = true;
+  setApplyStatus("Pošiljam …", "");
+  send(`obs_zeta ${tune.zeta}`);
+  send(`obs_bw ${fmtNum(tune.f[0], 2).replace("−", "-")} ${fmtNum(tune.f[1], 2).replace("−", "-")}`);
+}
+
+function setTestStatus(text, cls) { $("tStatus").textContent = text; $("tStatus").className = "status " + (cls || ""); }
+function setApplyStatus(text, cls) { $("aStatus").textContent = text; $("aStatus").className = "status " + (cls || ""); }
+
+// CSV save / load (same format as the device dump)
+function saveCsv() {
+  if (!capture) return;
+  const lines = ["# " + JSON.stringify(capture.meta), "t_us,c1,c2,v1,v2,pwm"];
+  for (let k = 0; k < capture.n; k++) {
+    lines.push([Math.round(capture.t[k] * 1e6), capture.c[0][k], capture.c[1][k],
+                capture.vfw[0][k], capture.vfw[1][k], capture.u[k]].join(","));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `flexdrive-zajem-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function loadCsvFile(file) {
+  const text = await file.text();
+  let meta = { cpr: cpr.slice() };
+  const rows = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    if (line.startsWith("#")) { try { meta = JSON.parse(line.slice(1).trim()); } catch { /* ignore */ } continue; }
+    const p = line.split(",").map(Number);
+    if (p.length >= 6 && p.every(Number.isFinite)) rows.push(p);
+  }
+  if (rows.length < 50) { setTestStatus("Datoteka ne vsebuje veljavnega zajema", "err"); return; }
+  loadCapture(meta, rows);
+  setTestStatus(`Naloženih ${rows.length} vzorcev iz ${file.name}`, "ok");
+}
+
+// ===========================================================================
+//  Generic plot (canvas)
+// ===========================================================================
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+function logTicks(lo, hi) {
+  const out = [];
+  for (let d = Math.floor(Math.log10(lo)); d <= Math.ceil(Math.log10(hi)); d++) {
+    for (const m of [1, 2, 5]) {
+      const v = m * Math.pow(10, d);
+      if (v >= lo * 0.999 && v <= hi * 1.001) out.push(v);
+    }
+  }
+  return out;
+}
+
+const fmtLog = v => (v >= 1 ? String(+v.toPrecision(3)) : v.toPrecision(1)).replace(".", ",");
+
+// Linear ticks inside [lo, hi]; dec = decimals suitable for the step.
+function linTicks(lo, hi, maxTicks) {
+  const step = niceStep((hi - lo) / Math.max(2, maxTicks));
+  const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  const ticks = [];
+  for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9; k++) {
+    const v = k * step, zero = Math.abs(v) < step / 2;
+    ticks.push({ v: zero ? 0 : v, zero, dec });
+  }
+  return { ticks, step, dec };
+}
+
+const tf  = (v, log) => (log ? Math.log10(v) : v);      // data -> plot coordinate
+const itf = (v, log) => (log ? Math.pow(10, v) : v);    // plot coordinate -> data
+
+/**
+ * o.x:      {min, max, log?, unit?, fmt?(v, dec)}   default x range
+ * o.y:      {log?, includeZero?, minSpan?, unit?}    auto y range settings
+ * o.view:   {x: {min,max}|null, y: {min,max}|null}   manual ranges (pan/zoom)
+ * o.series: [{xs, ys, color, width, alpha?, dash?}]
+ * o.vlines: [{x, color, dash?}]
+ * o.selection: {a, b} in plot coordinates (box zoom in progress)
+ * o.hover:  {px, py} cursor position for the crosshair
+ */
+function plot(canvas, o) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return null;
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = "12px system-ui, sans-serif";
+  const css = getComputedStyle(document.documentElement);
+  const col = n => css.getPropertyValue(n).trim();
+
+  const xLog = !!o.x.log, yLog = !!(o.y && o.y.log);
+  const view = o.view || {};
+  const xr = view.x || { min: o.x.min, max: o.x.max };
+  const xFmt = o.x.fmt || ((v, dec) => fmtNum(v, dec));
+
+  // ---- y range ------------------------------------------------------------------
+  let lo, hi, yTicks, yDec = 2;
+  if (view.y) {
+    lo = view.y.min; hi = view.y.max;
+  } else {
+    lo = Infinity; hi = -Infinity;
+    for (const s of o.series) {
+      for (let i = 0; i < s.ys.length; i++) {
+        const x = s.xs[i];
+        if (x < xr.min || x > xr.max) continue;
+        const y = s.ys[i];
+        if (!Number.isFinite(y) || (yLog && y <= 0)) continue;
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
+    }
+    if (yLog) {
+      if (!Number.isFinite(lo)) { lo = 0.001; hi = 1; }
+      lo = Math.pow(10, Math.floor(Math.log10(lo) * 2) / 2);
+      hi = Math.pow(10, Math.ceil(Math.log10(hi) * 2) / 2);
+    } else {
+      if (!Number.isFinite(lo)) { lo = 0; hi = 0; }
+      if (o.y && o.y.includeZero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+      const minSpan = (o.y && o.y.minSpan) || 0.1;
+      if (hi - lo < minSpan) { const m = (hi + lo) / 2; lo = m - minSpan / 2; hi = m + minSpan / 2; }
+      const step = niceStep((hi - lo) / 5);
+      lo = Math.floor(lo / step - 1e-9) * step;
+      hi = Math.ceil(hi / step + 1e-9) * step;
+    }
+  }
+  if (yLog) {
+    yTicks = logTicks(lo, hi).map(v => ({ v, label: fmtLog(v) }));
+  } else {
+    const lt = linTicks(lo, hi, 5);
+    yDec = lt.dec;
+    yTicks = lt.ticks.map(t => ({ v: t.v, zero: t.zero, label: fmtNum(t.v, t.dec) }));
+  }
+
+  // ---- layout -----------------------------------------------------------------------
+  const labelW = Math.max(24, ...yTicks.map(t => ctx.measureText(t.label).width));
+  const L = Math.ceil(labelW) + 14, R = 18, T = 8, B = 24;
+  const pw = w - L - R, ph = h - T - B;
+  if (pw <= 0 || ph <= 0) return null;
+  const xa = tf(xr.min, xLog), xb = tf(xr.max, xLog), ya = tf(lo, yLog), yb = tf(hi, yLog);
+  const X = v => L + (tf(v, xLog) - xa) / (xb - xa) * pw;
+  const Y = v => T + (yb - tf(v, yLog)) / (yb - ya) * ph;
+
+  // ---- grid & labels ---------------------------------------------------------------
+  ctx.lineWidth = 1;
+  ctx.fillStyle = col("--muted");
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const t of yTicks) {
+    const y = Math.round(Y(t.v)) + 0.5;
+    ctx.strokeStyle = t.zero ? col("--axis") : col("--grid");
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillText(t.label, L - 8, y);
+  }
+  let xTicks, xDec = 2;
+  if (xLog) {
+    xTicks = logTicks(xr.min, xr.max).map(v => ({ v, label: fmtLog(v) }));
+  } else {
+    const lt = linTicks(xr.min, xr.max, Math.floor(pw / 80));
+    xDec = lt.dec;
+    xTicks = lt.ticks.map(t => ({ v: t.v, label: xFmt(t.v, t.dec) }));
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const t of xTicks) {
+    const x = Math.round(X(t.v)) + 0.5;
+    ctx.strokeStyle = col("--grid");
+    ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke();
+    ctx.fillText(t.label, x, T + ph + 6);
+  }
+  ctx.strokeStyle = col("--border");
+  ctx.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
+
+  // ---- series ----------------------------------------------------------------------
+  ctx.save();
+  ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+  ctx.lineJoin = "round";
+  // include one point outside each edge so lines reach the border
+  const xmin = xr.min - (xr.max - xr.min) * 0.02, xmax = xr.max + (xr.max - xr.min) * 0.02;
+  for (const s of o.series) {
+    ctx.strokeStyle = col(s.color);
+    ctx.globalAlpha = s.alpha ?? 1;
+    ctx.lineWidth = s.width ?? 2;
+    ctx.setLineDash(s.dash || []);
+    ctx.beginPath();
+    let pen = false;
+    const n = s.xs.length;
+    for (let i = 0; i < n; i++) {
+      const xv = s.xs[i];
+      if (xv < xmin || xv > xmax) { pen = false; continue; }
+      const yv = s.ys[i];
+      if (!Number.isFinite(yv) || (yLog && yv <= 0)) { pen = false; continue; }
+      const x = X(xv), y = Y(yv);
+      if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (const v of o.vlines || []) {
+    const x = Math.round(X(v.x)) + 0.5;
+    ctx.strokeStyle = col(v.color);
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash(v.dash || [4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (o.selection) {
+    const a = L + (Math.min(o.selection.a, o.selection.b) - xa) / (xb - xa) * pw;
+    const b = L + (Math.max(o.selection.a, o.selection.b) - xa) / (xb - xa) * pw;
+    ctx.fillStyle = col("--accent");
+    ctx.globalAlpha = 0.14;
+    ctx.fillRect(a, T, b - a, ph);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+
+  if (o.emptyText) {
+    ctx.fillStyle = col("--muted");
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(o.emptyText, L + pw / 2, T + ph / 2);
+  }
+
+  // ---- crosshair -----------------------------------------------------------------
+  const hv = o.hover;
+  if (hv && hv.px >= L && hv.px <= L + pw && hv.py >= T && hv.py <= T + ph) {
+    const xv = itf(xa + (hv.px - L) / pw * (xb - xa), xLog);
+    const yv = itf(yb - (hv.py - T) / ph * (yb - ya), yLog);
+    ctx.strokeStyle = col("--axis");
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(hv.px) + 0.5, T); ctx.lineTo(Math.round(hv.px) + 0.5, T + ph);
+    ctx.moveTo(L, Math.round(hv.py) + 0.5); ctx.lineTo(L + pw, Math.round(hv.py) + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const xs = xLog ? `${fmtLog(xv)}${o.x.unit ? " " + o.x.unit : ""}` : xFmt(xv, xDec + 1);
+    const ys = (yLog ? fmtLog(yv) : fmtNum(yv, yDec + 1)) + (o.y && o.y.unit ? " " + o.y.unit : "");
+    const text = `${xs}  ·  ${ys}`;
+    const tw = ctx.measureText(text).width + 12, th = 20;
+    let bx = hv.px + 10, by = hv.py - th - 8;
+    if (bx + tw > L + pw) bx = hv.px - tw - 10;
+    if (by < T) by = hv.py + 10;
+    ctx.fillStyle = col("--panel");
+    ctx.globalAlpha = 0.92;
+    ctx.fillRect(bx, by, tw, th);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = col("--border");
+    ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, th - 1);
+    ctx.fillStyle = col("--text");
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(text, bx + 6, by + th / 2);
+  }
+
+  const layout = { L, T, pw, ph, xa, xb, ya, yb, xLog, yLog };
+  canvas._layout = layout;
+  return layout;
+}
+
+// ===========================================================================
+//  Chart interaction: pan, zoom, box zoom, crosshair
+//
+//    wheel                 zoom time / x axis
+//    Shift + wheel         zoom y axis
+//    wheel over an axis    zoom that axis
+//    drag                  pan (over an axis: only that axis)
+//    Shift + drag          select an x range to zoom into
+//    double click          automatic range (over an axis: only that axis)
+//
+//  Charts in the same group share the x axis; each chart has its own y axis.
+// ===========================================================================
+const groups = {
+  mon:   { x: null, sel: null, charts: ["chartVel", "chartAng"],   redraw: () => { chartsDirty = true; } },
+  cap:   { x: null, sel: null, charts: ["chartCap", "chartCapU"],  redraw: () => { tuneDirty = true; } },
+  sweep: { x: null, sel: null, charts: ["chartSweep"],             redraw: () => { tuneDirty = true; } },
+};
+const chartState = {};   // canvas id -> {group, y, hover}
+
+function chartOpts(id) {
+  const st = chartState[id], g = groups[st.group];
+  return { view: { x: g.x, y: st.y }, hover: st.hover, selection: g.sel };
+}
+
+function setXRange(group, a, b, lay, freeze) {
+  if (!(b - a > 1e-9) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+  if (group === "mon" && freeze) freezeMonitor();
+  groups[group].x = { min: itf(a, lay.xLog), max: itf(b, lay.xLog) };
+  groups[group].redraw();
+}
+
+function setYRange(id, a, b, lay) {
+  if (!(b - a > 1e-12) || !Number.isFinite(a) || !Number.isFinite(b)) return;
+  chartState[id].y = { min: itf(a, lay.yLog), max: itf(b, lay.yLog) };
+  groups[chartState[id].group].redraw();
+}
+
+function resetChart(id, region) {
+  const st = chartState[id], g = groups[st.group];
+  if (region !== "y") g.x = null;
+  if (region !== "x") st.y = null;
+  g.redraw();
+}
+
+function resetGroup(name) {
+  const g = groups[name];
+  g.x = null;
+  g.sel = null;
+  for (const id of g.charts) chartState[id].y = null;
+  g.redraw();
+}
+
+function freezeMonitor() {
+  if (paused) return;
+  paused = true;
+  pausedEnd = history.length ? history[history.length - 1].t : 0;
+  $("btnPause").textContent = "Nadaljuj";
+}
+
+function regionAt(lay, px, py) {
+  if (px < lay.L) return "y";
+  if (py > lay.T + lay.ph) return "x";
+  return "xy";
+}
+
+function attachChart(id, group) {
+  const canvas = $(id);
+  chartState[id] = { group, y: null, hover: null };
+  let drag = null;
+
+  canvas.addEventListener("pointerdown", e => {
+    const lay = canvas._layout;
+    if (!lay || e.button !== 0) return;
+    canvas.setPointerCapture(e.pointerId);
+    const region = regionAt(lay, e.offsetX, e.offsetY);
+    drag = { region, box: e.shiftKey && region === "xy", px: e.offsetX, py: e.offsetY, lay: { ...lay }, moved: false };
+    chartState[id].hover = null;
+    canvas.style.cursor = drag.box ? "col-resize" : "grabbing";
+  });
+
+  canvas.addEventListener("pointermove", e => {
+    const lay = canvas._layout;
+    if (!lay) return;
+    const st = chartState[id], g = groups[st.group];
+    if (!drag) {
+      const region = regionAt(lay, e.offsetX, e.offsetY);
+      st.hover = region === "xy" && e.offsetX <= lay.L + lay.pw && e.offsetY >= lay.T ? { px: e.offsetX, py: e.offsetY } : null;
+      canvas.style.cursor = region === "y" ? "ns-resize" : region === "x" ? "ew-resize" : (e.shiftKey ? "col-resize" : "crosshair");
+      g.redraw();
+      return;
+    }
+    const L0 = drag.lay;
+    const dx = e.offsetX - drag.px, dy = e.offsetY - drag.py;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    if (drag.box) {
+      const toPlotX = px => L0.xa + (px - L0.L) / L0.pw * (L0.xb - L0.xa);
+      g.sel = { a: toPlotX(drag.px), b: toPlotX(clamp(e.offsetX, L0.L, L0.L + L0.pw)) };
+      g.redraw();
+      return;
+    }
+    if (drag.region !== "y" && dx !== 0) {
+      const d = dx / L0.pw * (L0.xb - L0.xa);
+      setXRange(st.group, L0.xa - d, L0.xb - d, L0, true);
+    }
+    if (drag.region !== "x" && dy !== 0) {
+      const d = dy / L0.ph * (L0.yb - L0.ya);
+      setYRange(id, L0.ya + d, L0.yb + d, L0);
+    }
+  });
+
+  const endDrag = () => {
+    if (!drag) return;
+    const st = chartState[id], g = groups[st.group];
+    if (drag.box) {
+      const sel = g.sel;
+      g.sel = null;
+      if (drag.moved && sel && Math.abs(sel.b - sel.a) > 1e-9) {
+        setXRange(st.group, Math.min(sel.a, sel.b), Math.max(sel.a, sel.b), drag.lay, true);
+      } else g.redraw();
+    }
+    drag = null;
+    canvas.style.cursor = "";
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("pointerleave", () => {
+    if (drag) return;
+    chartState[id].hover = null;
+    groups[chartState[id].group].redraw();
+  });
+
+  canvas.addEventListener("wheel", e => {
+    const lay = canvas._layout;
+    if (!lay) return;
+    e.preventDefault();
+    // Shift+wheel arrives as horizontal scroll (deltaX) in Chrome
+    let delta = e.deltaY || e.deltaX;
+    if (e.deltaMode === 1) delta *= 33;
+    const k = Math.pow(1.0015, clamp(delta, -300, 300));   // >1 zoom out, <1 zoom in
+    let region = regionAt(lay, e.offsetX, e.offsetY);
+    if (region === "xy") region = e.shiftKey ? "y" : "x";
+    const st = chartState[id];
+    if (region === "x") {
+      let c = lay.xa + (e.offsetX - lay.L) / lay.pw * (lay.xb - lay.xa);
+      if (st.group === "mon" && !paused) c = lay.xb;   // live: keep the newest sample at the right edge
+      setXRange(st.group, c - (c - lay.xa) * k, c + (lay.xb - c) * k, lay, false);
+    } else {
+      const c = lay.yb - (e.offsetY - lay.T) / lay.ph * (lay.yb - lay.ya);
+      setYRange(id, c - (c - lay.ya) * k, c + (lay.yb - c) * k, lay);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener("dblclick", e => {
+    const lay = canvas._layout;
+    if (!lay) return;
+    resetChart(id, regionAt(lay, e.offsetX, e.offsetY));
+  });
+}
+
+// ===========================================================================
+//  Velocity from position, computed in the browser
+//  Backward difference over a time window:  v = (a(t) - a(t - window)) / Δt
+//  Uses the actual timestamps, so gaps in telemetry do not bias the result.
+// ===========================================================================
+function posVelocity(k, key) {
+  if (k < 1) return NaN;
+  const p = history[k];
+  const tMin = p.t - posVelWinMs / 1000 - 0.001;   // 1 ms tolerance for timestamp jitter
+  let j = k;
+  while (j > 0 && history[j - 1].t >= tMin) j--;
+  if (j === k) j = k - 1;                         // window shorter than one sample
+  const dt = p.t - history[j].t;
+  return dt > 0 ? (p[key] - history[j][key]) / dt : NaN;
+}
+
+// ===========================================================================
+//  Monitor charts (x = time relative to the newest sample)
+// ===========================================================================
+function drawMonitorCharts() {
+  const tEnd = paused ? pausedEnd : (history.length ? history[history.length - 1].t : 0);
+  const xs = history.map(p => p.t - tEnd);
+  const x = { min: -winSec, max: 0, unit: "s", fmt: (v, dec) => (Math.abs(v) < 1e-9 ? "0 s" : `${fmtNum(v, dec)} s`) };
+  const empty = history.length ? null : (port ? "Čakam na podatke …" : "Poveži se z maketo");
+  const col = key => history.map(p => p[key]);
+
+  const vel = [];
+  if (on("velE1")) vel.push({ xs, ys: col("v1"), color: "--s1", width: 2 });
+  if (on("velE2")) vel.push({ xs, ys: col("v2"), color: "--s2", width: 2 });
+  if (on("velE1") && on("velRaw")) vel.push({ xs, ys: history.map((_, k) => posVelocity(k, "a1")), color: "--s1", width: 1.5, dash: [5, 3], alpha: 0.85 });
+  if (on("velE2") && on("velRaw")) vel.push({ xs, ys: history.map((_, k) => posVelocity(k, "a2")), color: "--s2", width: 1.5, dash: [5, 3], alpha: 0.85 });
+  plot($("chartVel"), { x, y: { includeZero: true, minSpan: 0.1, unit: "obr/s" }, series: vel, emptyText: empty, ...chartOpts("chartVel") });
+
+  const sc = angleScale();
+  const ang = [];
+  if (on("angE1")) ang.push({ xs, ys: history.map(p => p.a1 * sc), color: "--s1", width: 2 });
+  if (on("angE2")) ang.push({ xs, ys: history.map(p => p.a2 * sc), color: "--s2", width: 2 });
+  plot($("chartAng"), { x, y: { minSpan: 0.01 * sc, unit: ANGLE_UNITS[angleUnit].label }, series: ang, emptyText: empty, ...chartOpts("chartAng") });
+}
+
+// ===========================================================================
+//  Tuning charts
+// ===========================================================================
+const obsOut = [null, null];
+
+function drawTuningCharts() {
+  const c = capture;
+  const capX = c
+    ? { min: c.t[0], max: c.t[c.n - 1], unit: "s", fmt: (v, dec) => `${fmtNum(v, dec)} s` }
+    : { min: 0, max: 5, unit: "s", fmt: (v, dec) => `${fmtNum(v, dec)} s` };
+  const sweepX = { min: 2, max: 200, log: true, unit: "Hz" };
+
+  if (!c) {
+    const empty = port ? "Zaženi test ali naloži CSV" : "Poveži se z maketo ali naloži CSV";
+    plot($("chartCap"), { x: capX, y: { includeZero: true }, series: [], emptyText: empty, ...chartOpts("chartCap") });
+    plot($("chartCapU"), { x: capX, y: { includeZero: true }, series: [], ...chartOpts("chartCapU") });
+    plot($("chartSweep"), { x: sweepX, y: { log: true }, series: [], emptyText: "Ni zajema", ...chartOpts("chartSweep") });
+    return;
+  }
+
+  for (const i of [0, 1]) obsOut[i] = runObserver(c.c[i], c.t, c.cpr[i], tune.f[i], tune.zeta, obsOut[i] && obsOut[i].length === c.n ? obsOut[i] : null);
+
+  const series = [];
+  if (on("cFw") && on("cE1")) series.push({ xs: c.t, ys: c.vfw[0], color: "--s1", width: 1, alpha: 0.45 });
+  if (on("cFw") && on("cE2")) series.push({ xs: c.t, ys: c.vfw[1], color: "--s2", width: 1, alpha: 0.45 });
+  if (on("cE1")) series.push({ xs: c.t, ys: obsOut[0], color: "--s1", width: 1.75 });
+  if (on("cE2")) series.push({ xs: c.t, ys: obsOut[1], color: "--s2", width: 1.75 });
+  if (on("cRef")) series.push({ xs: c.t, ys: c.vref, color: "--ref", width: 1.5, dash: [5, 4] });
+  plot($("chartCap"), { x: capX, y: { includeZero: true, minSpan: 0.1, unit: "obr/s" }, series, ...chartOpts("chartCap") });
+  plot($("chartCapU"), { x: capX, y: { includeZero: true, minSpan: 100, unit: "PWM" }, series: [{ xs: c.t, ys: c.u, color: "--u", width: 1.75 }], ...chartOpts("chartCapU") });
+
+  if (sweepDirty || !sweep) { computeSweep(); sweepDirty = false; }
+  const sw = [];
+  for (const i of [0, 1]) {
+    const color = i ? "--s2" : "--s1";
+    sw.push({ xs: SWEEP_F, ys: sweep[i].tot, color, width: 2 });
+    sw.push({ xs: SWEEP_F, ys: sweep[i].trk, color, width: 1.25, dash: [6, 4] });
+    sw.push({ xs: SWEEP_F, ys: sweep[i].qn,  color, width: 1.25, dash: [2, 3] });
+  }
+  plot($("chartSweep"), {
+    x: sweepX, y: { log: true, unit: "obr/s" }, series: sw,
+    vlines: [{ x: tune.f[0], color: "--s1" }, { x: tune.f[1], color: "--s2" }],
+    ...chartOpts("chartSweep"),
+  });
+}
+
+// ===========================================================================
+//  UI helpers
+// ===========================================================================
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function fmtNum(v, dec) {
+  const s = Number(v).toFixed(dec);
+  return (/^-0(\.0*)?$/.test(s) ? s.slice(1) : s).replace("-", "−");
+}
+
+function setStatus(text, cls) {
+  $("status").textContent = text;
+  $("status").className = "pill " + (cls || "");
+}
+
+function setConnectedUi(connected) {
+  $("btnConnect").textContent = connected ? "Prekini" : "Poveži";
+  $("btnConnect").classList.toggle("primary", !connected);
+  for (const id of ["btnReset", "pwmSlider", "pwmInput", "btnStop", "btnRunTest", "btnApply"]) $(id).disabled = !connected;
+  if (!connected) {
+    setStatus("Ni povezave", "");
+    $("rate").textContent = "–";
+    $("pwmActual").textContent = "–";
+  }
+  chartsDirty = true;
+  tuneDirty = true;
+}
+
+function updateNumbers() {
+  const m = latest;
+  if (!m) return;
+  [[m.v1, m.p1, m.e1, 0], [m.v2, m.p2, m.e2, 1]].forEach(([v, p, e, i]) => {
+    const n = i + 1, turns = p / cpr[i];
+    $("v" + n).textContent = fmtNum(v, 3);
+    $("rpm" + n).textContent = fmtNum(v * 60, 1);
+    $("deg" + n).textContent = fmtNum(((turns % 1) + 1) % 1 * 360, 1);
+    $("pos" + n).textContent = fmtNum(turns, 3);
+    $("cnt" + n).textContent = String(p).replace("-", "−");
+    $("err" + n).textContent = e;
+    $("err" + n).classList.toggle("alert", e > 0);
+  });
+  const last = history.length - 1;
+  $("pv1").textContent = last > 0 ? fmtNum(posVelocity(last, "a1"), 3) : "–";
+  $("pv2").textContent = last > 0 ? fmtNum(posVelocity(last, "a2"), 3) : "–";
+  $("devTime").textContent = `${fmtNum(m.t / 1000, 1)} s`;
+  if (m.u != null) $("pwmActual").textContent = String(m.u).replace("-", "−");
+}
+
+setInterval(() => {
+  const rate = rxCount; rxCount = 0;
+  if (!port) return;
+  $("rate").textContent = `${rate} Hz`;
+  if (capRx) setStatus("Povezano · prenos zajema", "ok");
+  else if (performance.now() - lastRxAt > STALE_MS) setStatus("Povezano · ni podatkov", "warn");
+  else setStatus("Povezano", "ok");
+}, 1000);
+
+function log(text) {
+  logLines.push(text);
+  if (logLines.length > 500) logLines.splice(0, logLines.length - 500);
+  logDirty = true;
+}
+
+function renderLog() {
+  const el = $("log");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+  el.textContent = logLines.join("\n");
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function setTab(name) {
+  activeTab = name;
+  for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.tab === name);
+  for (const s of document.querySelectorAll("section[data-tab]")) s.hidden = s.dataset.tab !== name;
+  chartsDirty = true;
+  tuneDirty = true;
+  try { localStorage.setItem("flexdrive.tab", name); } catch { /* ignore */ }
+}
+
+// ===========================================================================
+//  Render loop
+// ===========================================================================
+function frame() {
+  if (numbersDirty) { updateNumbers(); numbersDirty = false; }
+  if (activeTab === "monitor" && chartsDirty) { drawMonitorCharts(); chartsDirty = false; }
+  if (activeTab === "tuning" && tuneDirty) { updateMetricsTable(); drawTuningCharts(); tuneDirty = false; }
+  if (logDirty && $("logPanel").open) { renderLog(); logDirty = false; }
+  requestAnimationFrame(frame);
+}
+
+// ===========================================================================
+//  Wiring
+// ===========================================================================
+if (!("serial" in navigator)) {
+  $("unsupported").hidden = false;
+  $("btnConnect").disabled = true;
+} else {
+  navigator.serial.addEventListener("disconnect", e => {
+    if (port && e.target === port) { log("— naprava odklopljena —"); disconnect(); }
+  });
+}
+
+$("btnConnect").addEventListener("click", () => (port ? disconnect() : connect()));
+$("btnReset").addEventListener("click", resetBoard);
+$("tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTab(b.dataset.tab); });
+
+// motor
+$("pwmSlider").addEventListener("input", e => requestPwm(e.target.value));
+$("pwmInput").addEventListener("change", e => requestPwm(e.target.value));
+$("pwmInput").addEventListener("keydown", e => { if (e.key === "Enter") requestPwm(e.target.value); });
+$("btnStop").addEventListener("click", stopMotor);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && port) stopMotor(); });
+window.addEventListener("beforeunload", () => { if (port) send("stop"); });
+
+// monitor
+for (const id of ["velE1", "velE2", "velRaw", "angE1", "angE2"]) $(id).addEventListener("change", () => { chartsDirty = true; });
+$("winSel").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  winSec = Number(b.dataset.s);
+  for (const x of $("winSel").children) x.classList.toggle("on", x === b);
+  groups.mon.x = null;           // window buttons override a manual x zoom
+  chartsDirty = true;
+});
+$("pvWin").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  posVelWinMs = Number(b.dataset.ms);
+  for (const x of $("pvWin").children) x.classList.toggle("on", x === b);
+  chartsDirty = true;
+  numbersDirty = true;
+});
+$("angUnit").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  angleUnit = b.dataset.u;
+  for (const x of $("angUnit").children) x.classList.toggle("on", x === b);
+  $("angUnitLabel").textContent = ANGLE_UNITS[angleUnit].label;
+  chartState.chartAng.y = null;  // manual y range was in the old unit
+  chartsDirty = true;
+});
+$("btnPause").addEventListener("click", () => {
+  paused = !paused;
+  pausedEnd = history.length ? history[history.length - 1].t : 0;
+  $("btnPause").textContent = paused ? "Nadaljuj" : "Zamrzni";
+  // when resuming, keep the zoomed span but jump back to "now"
+  if (!paused && groups.mon.x) groups.mon.x = { min: groups.mon.x.min - groups.mon.x.max, max: 0 };
+  chartsDirty = true;
+});
+
+// tuning
+$("btnRunTest").addEventListener("click", runTest);
+$("btnSaveCsv").addEventListener("click", saveCsv);
+$("btnLoadCsv").addEventListener("click", () => $("fileCsv").click());
+$("fileCsv").addEventListener("change", e => { const f = e.target.files[0]; if (f) loadCsvFile(f); e.target.value = ""; });
+for (const id of ["cE1", "cE2", "cRef", "cFw"]) $(id).addEventListener("change", () => { tuneDirty = true; });
+$("btnZoomReset").addEventListener("click", () => resetGroup("cap"));
+$("btnSweepReset").addEventListener("click", () => resetGroup("sweep"));
+$("btnMonReset").addEventListener("click", () => resetGroup("mon"));
+for (const [g, def] of Object.entries(groups)) for (const id of def.charts) attachChart(id, g);
+
+for (const i of [0, 1]) {
+  const n = i + 1;
+  $(`f${n}Slider`).addEventListener("input", e => setTuneParams(i === 0 ? sliderToF(+e.target.value) : null, i === 1 ? sliderToF(+e.target.value) : null, null));
+  $(`f${n}Num`).addEventListener("change", e => {
+    const v = Number(String(e.target.value).replace(",", "."));
+    if (Number.isFinite(v)) setTuneParams(i === 0 ? v : null, i === 1 ? v : null, null);
+  });
+}
+$("zSlider").addEventListener("input", e => setTuneParams(null, null, Number(e.target.value)));
+$("zNum").addEventListener("change", e => {
+  const v = Number(String(e.target.value).replace(",", "."));
+  if (Number.isFinite(v)) setTuneParams(null, null, v);
+});
+$("btnSuggest").addEventListener("click", suggest);
+$("btnApply").addEventListener("click", applyToDevice);
+
+$("btnClearLog").addEventListener("click", () => { logLines.length = 0; logDirty = true; renderLog(); });
+$("logPanel").addEventListener("toggle", () => { logDirty = true; });
+window.addEventListener("resize", () => { chartsDirty = true; tuneDirty = true; });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { chartsDirty = true; tuneDirty = true; });
+
+setTuneParams(70, 40, 0.707);   // firmware defaults; replaced by device values on connect
+try { const t = localStorage.getItem("flexdrive.tab"); if (t === "tuning" || t === "monitor") setTab(t); } catch { /* ignore */ }
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
