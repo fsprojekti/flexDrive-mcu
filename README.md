@@ -119,3 +119,84 @@ dir 0
 #-> Direction set to: Forward.
 run
 #-> System Started.
+
+---
+
+## Firmware v2.1 (`firmware/flexdrive/`)
+
+The sections above describe the v1 firmware (`arduino/`). Firmware v2.x lives in
+`firmware/flexdrive/` and talks to the web page `web/index.html` (Web Serial, Chrome/Edge)
+with JSON lines. The full protocol is documented in `firmware/flexdrive/telemetry.h`.
+
+- Serial: **921600 baud**, 8N1, commands are plain text lines.
+- Sampling, velocity observer and controller run at **1 kHz** in one task; telemetry at 50 Hz.
+- Velocity is the Luenberger observer estimate in **turns per second of the output shaft**
+  for both encoders (encoder 2 already includes the 20.4 gear ratio).
+
+### Modes
+
+| Mode | Command | Motor is driven by |
+|---|---|---|
+| 0 – open loop | `mode 0` | `pwm <n>` |
+| 1 – closed loop | `mode 1` | velocity PID on the feedback encoder (`fb`) |
+
+Controller (mode 1), same units as v1 so v1 gains stay meaningful:
+
+```
+e  = ref - v_fb                      [turn/s]
+u  = Kp*e + uI - Kd*d(v_fb)/dt       [% of PWM max], limited to +-umax
+uI = uI + Ki*e*dt                    conditional integration (anti-windup), |uI| <= umax
+```
+
+`Kp` [%/(turn/s)], `Ki` [%/turn], `Kd` [%·s/turn]. The integrator stores `uI` (already
+multiplied by `Ki`), so changing `Ki` while running does not make the output jump;
+`ki 0` clears it.
+
+### Commands
+
+| Command | Range | Default | Reply |
+|---|---|---|---|
+| `mode <0\|1>` | | 0 | `state` |
+| `pwm <n>` | −4000 … 4000, mode 0 only | 0 | – (error in mode 1) |
+| `ref <x>` | −10 … 10 turn/s | 0 | `state` |
+| `kp <x>` | 0 … 200 | 0 | `state` |
+| `ki <x>` | 0 … 2000 | 0 | `state` |
+| `kd <x>` | 0 … 10 | 0 | `state` |
+| `ts <ms>` | 1 … 50 (controller period, output held in between) | 1 | `state` |
+| `fb <1\|2>` | 1 = output shaft (4096 CPR), 2 = motor encoder | 1 | `state` |
+| `umax <x>` | 1 … 100 % | 100 | `state` |
+| `stop` | motor off, `ref 0`, back to mode 0 | | `state` |
+| `step <v> <n> [pre]` | capture `n` samples; at sample `pre` (default 200) apply `v` — PWM in mode 0, ref in mode 1 — in that same sample | | `cap_start`, then the dump |
+| `capture <n>` | 1 … 5000 samples at 1 kHz | | `cap_start`, then the dump |
+| `wd <ms>` | 0 (off) or 200 … 10000 | 0 | `state` |
+| `ping` | watchdog keep-alive | | – |
+| `state`, `info`, `help` | | | |
+| `tel <0\|1>` | telemetry stream off/on | 1 | – |
+| `obs_bw <f> [f2]`, `obs_zeta <z>` | observer tuning | 70/40 Hz, 0.707 | `info` |
+
+Capture dump columns: `t_us,c1,c2,v1,v2,pwm,ref,ui` (read them by name from `fields`
+in `cap_begin`; new columns are only appended).
+
+### Safety stops
+
+Each one sets `stop` and sends `{"type":"err","msg":...}` followed by `state`:
+
+| `msg` | When |
+|---|---|
+| `overspeed` | mode 1, speed of the feedback encoder above `SAFETY_V_LIMIT` for 50 ms |
+| `runaway` | mode 1, output saturated while the shaft turns against it and speeds up (wrong feedback sign) |
+| `encoder` | mode 1, more than 10 missed edges on the feedback encoder within 100 ms |
+| `watchdog` | `wd` enabled and no command line received within the period |
+
+Before first use on a new board: run `pwm 1500` and check that `v1 > 0` and `v2 > 0`;
+otherwise flip `ENC_SIGN` in `config.h`. Measure the speed at `pwm 4000` and set
+`SAFETY_V_LIMIT` to about 1.2× that value (see `firmware/TESTS_v2.1.md`).
+
+### Example: step response of a P controller
+
+```
+mode 1
+kp 20
+ref 2.5        # wait until the speed settles
+step 5 3000    # 200 samples before the step, ref 2.5 -> 5 at sample 200
+```

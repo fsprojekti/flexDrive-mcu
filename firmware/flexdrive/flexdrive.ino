@@ -5,7 +5,8 @@
 //  Modules:
 //    config.h      pins, constants, timing
 //    encoders      quadrature decoding in interrupts
-//    sampler       1 kHz sampling + velocity estimation (future: control loop)
+//    sampler       1 kHz sampling + velocity estimation, calls the controller
+//    controller    velocity PID (mode 1), open-loop PWM (mode 0), step test, safety stops
 //    velocity_observer  Luenberger observer for encoder angle/velocity
 //    motor         H-bridge PWM + direction output
 //    telemetry     JSON-lines link to the PC / web page (web/index.html)

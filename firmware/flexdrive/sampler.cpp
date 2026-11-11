@@ -1,7 +1,7 @@
 #include "sampler.h"
 #include "config.h"
 #include "velocity_observer.h"
-#include "motor.h"
+#include "controller.h"
 #include "esp_timer.h"
 
 namespace {
@@ -55,8 +55,13 @@ void samplerTask(void*) {
     latest = m;
     portEXIT_CRITICAL(&latestMux);
 
+    // Controller runs after the observer, before the sample is recorded, so a step
+    // applied at capture sample k shows up in row k (pwm/ref) of the dump.
     CaptureSample* buf = capBuf;
-    if (buf != nullptr && capIdx < capN) {
+    const bool capturing = (buf != nullptr && capIdx < capN);
+    const ControlOutput out = controllerUpdate(m, nowUs, capturing ? (int32_t)capIdx : -1);
+
+    if (capturing) {
       CaptureSample& s = buf[capIdx];
       s.dtUs = (capIdx == 0) ? 0 : (uint16_t)min<int64_t>(nowUs - capPrevUs, 65535);
       capPrevUs = nowUs;
@@ -64,7 +69,9 @@ void samplerTask(void*) {
         s.count[i]    = m.count[i];
         s.velMilli[i] = (int16_t)constrain(lroundf(m.velocity[i] * 1000.0f), -32767L, 32767L);
       }
-      s.pwm  = (int16_t)motorPwm();
+      s.pwm      = (int16_t)out.pwm;
+      s.refMilli = (int16_t)constrain(lroundf(out.ref * 1000.0f), -32767L, 32767L);
+      s.uiCenti  = (int16_t)constrain(lroundf(out.uI * 100.0f), -32767L, 32767L);
       capIdx = capIdx + 1;
     }
   }

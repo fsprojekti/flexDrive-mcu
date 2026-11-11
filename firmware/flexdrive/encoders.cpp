@@ -70,7 +70,7 @@ void encodersBegin() {
 }
 
 int32_t encoderCount(int idx) {
-  return enc[idx].count;   // 32-bit aligned read is atomic on ESP32
+  return ENC_SIGN[idx] * enc[idx].count;   // 32-bit aligned read is atomic on ESP32
 }
 
 uint32_t encoderErrors(int idx) {

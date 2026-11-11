@@ -7,7 +7,7 @@
 
 // ---- Firmware identity ------------------------------------------------------
 #define FW_NAME    "flexDrive"
-#define FW_VERSION "2.0.0-dev"
+#define FW_VERSION "2.1.0"
 
 // ---- Serial link to PC / web page --------------------------------------------
 constexpr uint32_t SERIAL_BAUD = 921600;   // CH9102 USB-UART; needed for 1 kHz capture dumps
@@ -27,6 +27,12 @@ constexpr float   ENC1_CPR   = 4096.0f;
 constexpr uint8_t ENC2_PIN_A = 36;
 constexpr uint8_t ENC2_PIN_B = 37;
 constexpr float   ENC2_CPR   = 48.0f * 20.4f;
+
+// Count direction per encoder (+1 / -1), applied in encoderCount().
+// A positive motor command must give a positive velocity on BOTH encoders, otherwise
+// the closed loop pushes the wrong way and runs away. Check with "pwm 1500":
+// v1 > 0 and v2 > 0. Flip the sign of the encoder that reads negative.
+constexpr int32_t ENC_SIGN[2] = {+1, +1};
 
 // ---- Motor driver (H-bridge: PWM + direction) ------------------------------------
 constexpr uint8_t  MOTOR_PWM_PIN  = 26;
@@ -54,6 +60,39 @@ constexpr float OBS_BW_MAX       = 200.0f;
 constexpr float OBS_ZETA_DEFAULT = 0.707f;  // ~25 % less lag than zeta=1 at equal noise
 constexpr float OBS_ZETA_MIN     = 0.3f;
 constexpr float OBS_ZETA_MAX     = 3.0f;
+
+// ---- Velocity controller (mode 1, see controller.h) ----------------------------
+// Units are the same as in the v1 firmware, so last year's gains stay meaningful:
+//   ref [turn/s], output u [% of MOTOR_PWM_MAX],
+//   Kp [%/(turn/s)], Ki [%/turn] = [%/(turn/s * s)], Kd [% * s/turn]
+constexpr float    CTRL_REF_MAX       = 10.0f;    // |ref| limit [turn/s]
+constexpr float    CTRL_KP_MAX        = 200.0f;
+constexpr float    CTRL_KI_MAX        = 2000.0f;
+constexpr float    CTRL_KD_MAX        = 10.0f;
+constexpr uint32_t CTRL_TS_DEFAULT_MS = 1;        // controller period, multiple of SAMPLE_PERIOD_MS
+constexpr uint32_t CTRL_TS_MAX_MS     = 50;
+constexpr float    CTRL_UMAX_DEFAULT  = 100.0f;   // output limit [%]
+constexpr float    CTRL_UMAX_MIN      = 1.0f;
+constexpr float    CTRL_TD_FILTER_MS  = 5.0f;     // first-order filter on the D term
+constexpr uint8_t  CTRL_FB_DEFAULT    = 1;        // feedback encoder: 1 = output shaft (4096 CPR)
+
+// ---- Step test ("step" command) ---------------------------------------------------
+constexpr uint32_t STEP_PRE_DEFAULT = 200;        // samples recorded before the step
+
+// ---- Safety (closed loop only, except the watchdog) -------------------------------
+// TODO(hardware): measure the open-loop speed at "pwm 4000" and set SAFETY_V_LIMIT to
+// about 1.2x that value. Until then 12 turn/s is a placeholder: if the real maximum
+// speed is lower, the overspeed check never trips and only the runaway check protects.
+constexpr float    SAFETY_V_LIMIT        = 12.0f;  // [turn/s] on the feedback encoder
+constexpr uint32_t SAFETY_OVERSPEED_MS   = 50;     // must persist this long to trip
+// Runaway (wrong feedback sign): output saturated, shaft turning against the command
+// and speeding up. A normal reversal decelerates first, so it does not trip this.
+constexpr float    SAFETY_RUNAWAY_V      = 0.5f;   // [turn/s] minimum speed / speed-up
+constexpr uint32_t SAFETY_RUNAWAY_MS     = 100;
+constexpr uint32_t SAFETY_ENC_ERR_MAX    = 10;     // missed edges allowed per window
+constexpr uint32_t SAFETY_ENC_WINDOW_MS  = 100;
+constexpr uint32_t WD_MIN_MS             = 200;    // "wd" range (0 = off)
+constexpr uint32_t WD_MAX_MS             = 10000;
 
 // ---- FreeRTOS tasks ---------------------------------------------------------------
 // Real-time work runs on core 1 (Arduino core); core 0 is left for WiFi later.
