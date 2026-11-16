@@ -19,7 +19,13 @@ volatile float obsZeta        = OBS_ZETA_DEFAULT;
 CaptureSample* volatile capBuf = nullptr;
 volatile uint32_t       capN   = 0;
 volatile uint32_t       capIdx = 0;
+volatile uint32_t       capDec = 1;
+volatile float          capRefScale = 1000.0f;
+uint32_t                capSub = 0;
 int64_t                 capPrevUs = 0;
+
+volatile bool zeroRequest = false;
+int32_t       zeroOffset[NUM_ENCODERS] = {0, 0};
 
 void samplerTask(void*) {
   EncoderObserver obs[NUM_ENCODERS];
@@ -42,11 +48,16 @@ void samplerTask(void*) {
 
     Measurement m;
     m.timeMs = (uint32_t)(nowUs / 1000);
+    int32_t raw[NUM_ENCODERS];
+    for (int i = 0; i < NUM_ENCODERS; ++i) raw[i] = encoderCount(i);
+    if (zeroRequest) {
+      for (int i = 0; i < NUM_ENCODERS; ++i) zeroOffset[i] = raw[i];
+      zeroRequest = false;
+    }
     for (int i = 0; i < NUM_ENCODERS; ++i) {
-      const int32_t c  = encoderCount(i);
-      const float   wn = 2.0f * PI * obsBandwidthHz[i];
-      obs[i].update(c, dt, wn, zeta);
-      m.count[i]    = c;
+      const float wn = 2.0f * PI * obsBandwidthHz[i];
+      obs[i].update(raw[i], dt, wn, zeta);   // observer on raw counts: unaffected by zero
+      m.count[i]    = (int32_t)((uint32_t)raw[i] - (uint32_t)zeroOffset[i]);
       m.velocity[i] = obs[i].velocity();
       m.errors[i]   = encoderErrors(i);
     }
@@ -61,7 +72,7 @@ void samplerTask(void*) {
     const bool capturing = (buf != nullptr && capIdx < capN);
     const ControlOutput out = controllerUpdate(m, nowUs, capturing ? (int32_t)capIdx : -1);
 
-    if (capturing) {
+    if (capturing && capSub == 0) {
       CaptureSample& s = buf[capIdx];
       s.dtUs = (capIdx == 0) ? 0 : (uint16_t)min<int64_t>(nowUs - capPrevUs, 65535);
       capPrevUs = nowUs;
@@ -69,11 +80,12 @@ void samplerTask(void*) {
         s.count[i]    = m.count[i];
         s.velMilli[i] = (int16_t)constrain(lroundf(m.velocity[i] * 1000.0f), -32767L, 32767L);
       }
-      s.pwm      = (int16_t)out.pwm;
-      s.refMilli = (int16_t)constrain(lroundf(out.ref * 1000.0f), -32767L, 32767L);
-      s.uiCenti  = (int16_t)constrain(lroundf(out.uI * 100.0f), -32767L, 32767L);
+      s.pwm       = (int16_t)out.pwm;
+      s.refScaled = (int16_t)constrain(lroundf(out.ref * capRefScale), -32767L, 32767L);
+      s.uiCenti   = (int16_t)constrain(lroundf(out.uI * 100.0f), -32767L, 32767L);
       capIdx = capIdx + 1;
     }
+    if (capturing) capSub = (capSub + 1 >= capDec) ? 0 : capSub + 1;
   }
 }
 
@@ -91,11 +103,14 @@ Measurement samplerLatest() {
   return m;
 }
 
-bool samplerStartCapture(CaptureSample* buf, uint32_t n) {
+bool samplerStartCapture(CaptureSample* buf, uint32_t n, uint32_t dec, float refScale) {
   if (capBuf != nullptr && capIdx < capN) return false;   // still running
   capBuf = nullptr;
   capIdx = 0;
   capN   = n;
+  capDec = dec < 1 ? 1 : dec;
+  capRefScale = refScale;
+  capSub = 0;
   capBuf = buf;   // publish last: sampler starts filling on its next tick
   return true;
 }
@@ -104,6 +119,7 @@ bool samplerCaptureDone() {
   return capBuf != nullptr && capIdx >= capN;
 }
 
+void  samplerZero() { zeroRequest = true; }
 void  samplerSetObserverBandwidth(int idx, float hz) { obsBandwidthHz[idx] = hz; }
 void  samplerSetObserverDamping(float zeta)          { obsZeta = zeta; }
 float samplerObserverBandwidth(int idx)              { return obsBandwidthHz[idx]; }

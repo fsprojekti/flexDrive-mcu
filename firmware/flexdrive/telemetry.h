@@ -4,20 +4,24 @@
 // Every line sent by the firmware is one JSON object with a "type" field:
 //   {"type":"info", "fw":..., "ver":..., "sample_ms":..., "tel_ms":..., "cpr":[c1,c2],
 //                   "obs_bw":[Hz1,Hz2], "obs_zeta":zeta, "pwm_max":n, "cap_max":n,
-//                   "ref_max":x, "v_limit":x, <state keys>}
+//                   "ref_max":x, "pos_ref_max":x, "prof_max":n, "dec_max":n, "v_limit":x,
+//                   <state keys>}
 //   {"type":"state", <state keys>}
 //       state keys: "mode","ref","pwm","kp","ki","kd","ts","fb","umax","wd"
 //       sent in reply to every command that changes a setting, to "state", and
 //       after every safety stop
 //   {"type":"tel",  "t":ms, "p1":count, "v1":turn/s, "p2":count, "v2":turn/s, "u":pwm,
-//                   "e1":n, "e2":n, "mode":m, "ref":turn/s, "uc":%, "ui":%, "sat":0|1}
-//                   v1/v2 = observer velocity estimate, uc = controller output [%],
-//                   ui = its integral part [%], sat = output limited by umax
+//                   "e1":n, "e2":n, "mode":m, "ref":x, "uc":%, "ui":%, "sat":0|1, "pt":ms}
+//                   p1/p2 = counts since "zero", v1/v2 = observer velocity estimate,
+//                   ref in turn/s (mode 0/1) or deg (mode 2), uc = controller output [%],
+//                   ui = its integral part [%], sat = output limited by umax,
+//                   pt = time since the profile started [ms], -1 if none is running
 //   {"type":"err",  "msg":...}     safety stops: "overspeed", "runaway", "encoder", "watchdog"
-//   {"type":"cap_start","n":N [,"step":{"pre":k,"val":x,"mode":m}]}
-//   {"type":"cap_begin","n":N,"fields":"t_us,c1,c2,v1,v2,pwm,ref,ui","obs_bw":..,
-//                       "obs_zeta":..,"cpr":..,"ctrl":{<state keys>},"step":{..}|null}
-//   t_us,c1,c2,v1,v2,pwm,ref,ui   <- N plain CSV lines, one per 1 ms sample
+//   {"type":"prof","n":points}     reply to "prof"
+//   {"type":"cap_start","n":N,"dec":d [,"step":{"pre":k,"val":x,"mode":m}] [,"run":true]}
+//   {"type":"cap_begin","n":N,"fields":"t_us,c1,c2,v1,v2,pwm,ref,ui","dec":d,"run":bool,
+//                       "obs_bw":..,"obs_zeta":..,"cpr":..,"ctrl":{<state keys>},"step":{..}|null}
+//   t_us,c1,c2,v1,v2,pwm,ref,ui   <- N plain CSV lines, one every dec ms
 //   {"type":"cap_end","n":N}
 //   Columns are only ever appended; read them by name from "fields". Replies to
 //   commands sent during a dump (e.g. "stop") appear as JSON lines between CSV rows.
@@ -27,16 +31,19 @@
 // Commands from the PC are plain text lines:
 //   help / info / state
 //   tel <0|1>          telemetry stream off/on (off is handy in a serial terminal)
-//   mode <0|1>         0 = open loop, 1 = closed-loop velocity control (see controller.h)
-//   pwm <n>            open-loop motor command, -pwm_max..pwm_max (error in mode 1)
-//   ref <x>            velocity reference [turn/s]
+//   mode <0|1|2>       0 = open loop, 1 = velocity control, 2 = angle control (controller.h)
+//   pwm <n>            open-loop motor command, -pwm_max..pwm_max (error in modes 1/2)
+//   ref <x>            reference: velocity [turn/s] in mode 1, angle [deg] in mode 2
+//   zero               angle 0 at the current position (mode 0 only)
 //   kp / ki / kd <x>   controller gains
 //   ts <ms>            controller period
 //   fb <1|2>           feedback encoder
 //   umax <x>           output limit [%]
 //   stop               motor off, ref 0, mode 0 (always works, also during dumps)
 //   step <v> <n> [pre] capture n samples; at sample pre apply v (pwm or ref) in that sample
-//   capture <n>        record n samples at 1 kHz, then dump them
+//   capture <n> [dec]  record n samples, one every dec ms, then dump them
+//   prof clear | prof add <t_ms> <v>    piecewise-linear reference profile
+//   run <n> [dec]      start the profile and a capture in the same sample
 //   wd <ms>            connection watchdog, 0 = off; any command line feeds it
 //   ping               watchdog keep-alive, no reply
 //   obs_bw <f1> [f2]   observer bandwidth [Hz] (one value = both encoders), replies with info

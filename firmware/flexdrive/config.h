@@ -7,7 +7,7 @@
 
 // ---- Firmware identity ------------------------------------------------------
 #define FW_NAME    "flexDrive"
-#define FW_VERSION "2.1.0"
+#define FW_VERSION "2.2.0"
 
 // ---- Serial link to PC / web page --------------------------------------------
 constexpr uint32_t SERIAL_BAUD = 921600;   // CH9102 USB-UART; needed for 1 kHz capture dumps
@@ -76,14 +76,25 @@ constexpr float    CTRL_UMAX_MIN      = 1.0f;
 constexpr float    CTRL_TD_FILTER_MS  = 5.0f;     // first-order filter on the D term
 constexpr uint8_t  CTRL_FB_DEFAULT    = 1;        // feedback encoder: 1 = output shaft (4096 CPR)
 
+// ---- Angle controller (mode 2) ------------------------------------------------------
+// Same PID, but on the angle of the feedback encoder relative to the last "zero":
+//   ref [deg], Kp [%/deg], Ki [%/(deg*s)], Kd [%*s/deg]; D acts on the observer velocity.
+constexpr float    CTRL_POS_REF_MAX   = 3000.0f;  // |ref| limit in mode 2 [deg] (capture stores 0.1 deg in int16)
+
+// ---- Reference profile ("prof" / "run") ----------------------------------------------
+// Piecewise-linear reference, time in ms from the start of "run". Used as ref in every
+// mode (in mode 0 it is only recorded, e.g. as the target for manual tracking).
+constexpr uint32_t PROF_MAX_POINTS    = 24;
+constexpr uint32_t PROF_MAX_MS        = 120000;
+constexpr uint32_t CAPTURE_DEC_MAX    = 50;       // capture decimation: one sample every n ms
+
 // ---- Step test ("step" command) ---------------------------------------------------
 constexpr uint32_t STEP_PRE_DEFAULT = 200;        // samples recorded before the step
 
 // ---- Safety (closed loop only, except the watchdog) -------------------------------
-// TODO(hardware): measure the open-loop speed at "pwm 4000" and set SAFETY_V_LIMIT to
-// about 1.2x that value. Until then 12 turn/s is a placeholder: if the real maximum
-// speed is lower, the overspeed check never trips and only the runaway check protects.
-constexpr float    SAFETY_V_LIMIT        = 12.0f;  // [turn/s] on the feedback encoder
+// Measured 2026-11-16 on the lab FlexDrive: 6.2 turn/s at "pwm 4000" (both encoders),
+// open-loop dead zone ~6 % (shaft starts at pwm 240). Limit = 1.2x the maximum speed.
+constexpr float    SAFETY_V_LIMIT        = 7.5f;   // [turn/s] on the feedback encoder
 constexpr uint32_t SAFETY_OVERSPEED_MS   = 50;     // must persist this long to trip
 // Runaway (wrong feedback sign): output saturated, shaft turning against the command
 // and speeding up. A normal reversal decelerates first, so it does not trip this.

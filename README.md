@@ -200,3 +200,36 @@ kp 20
 ref 2.5        # wait until the speed settles
 step 5 3000    # 200 samples before the step, ref 2.5 -> 5 at sample 200
 ```
+
+## Firmware v2.2: angle control (servo) and reference profiles
+
+v2.2 adds everything from v2.1 plus:
+
+| Command | Range | Reply | Notes |
+|---|---|---|---|
+| `mode 2` | | `state` | PID on the **angle** of the feedback encoder; on entry `ref` = current angle (no jump) |
+| `ref <x>` in mode 2 | −3000 … 3000 ° | `state` | |
+| `zero` | mode 0 only | `state` | angle 0 at the current position (counts `p1`/`p2`/`c1`/`c2` restart at 0) |
+| `prof clear` / `prof add <t_ms> <v>` | up to 24 points, t strictly increasing | `{"type":"prof","n":k}` | piecewise-linear ref(t) |
+| `run <n> [dec]` | | `cap_start`, then the dump | starts the profile and a capture in the same sample |
+| `capture <n> [dec]` | dec 1 … 50 | | one row every `dec` ms (5000 rows × 10 ms = 50 s) |
+
+Mode 2 control law (same PID, same anti-windup):
+
+```
+e  = ref - theta_fb                  [deg], theta since the last "zero"
+u  = Kp*e + uI - Kd*omega_fb         omega_fb = observer velocity [deg/s], filtered 5 ms
+```
+
+`Kp` [%/°], `Ki` [%/(°·s)], `Kd` [%·s/°]. The profile drives `ref` in every mode; in mode 0
+it is only recorded (target for manual tracking). Setting `ref`, `stop` or a mode change
+ends it. Telemetry gains `"pt"` (ms since the profile started, −1 if none); `cap_begin`
+gains `"dec"` and `"run"`.
+
+**Feedback encoder for angle control: use `fb 2`.** The output shaft (encoder 1) sits
+behind the elastic coupling. With `fb 1` the shaft keeps swinging on the coupling
+(~2 Hz, ±20°) while the motor sticks in its dead zone, and the loop limit-cycles even with
+ZN gains. With `fb 2` the loop is well behaved and encoder 1 shows the coupling swing.
+
+Measured on the lab unit (2026-11-16) are in `firmware/TESTS_v2.2.md`. The student
+page for the lab exercise (MKT VL4) is maintained in the course repository.

@@ -20,8 +20,15 @@ struct CaptureMeta {
   bool     isStep;
   uint32_t stepPre;
   float    stepVal;
+  uint32_t dec;        // one row every dec ms
+  float    refScale;   // ref stored as int16 ref*refScale
+  bool     isRun;      // capture started together with the reference profile
 };
 CaptureMeta capMeta = {};
+
+// Capture resolution of ref: 0.001 turn/s (modes 0/1) or 0.1 deg (mode 2, +-3276 deg).
+float refScaleFor(uint8_t mode) { return mode == MODE_POS ? 10.0f : 1000.0f; }
+float refLimitFor(uint8_t mode) { return mode == MODE_POS ? CTRL_POS_REF_MAX : CTRL_REF_MAX; }
 
 bool telemetryOn = true;              // "tel 0" silences the stream for manual terminal use
 
@@ -42,14 +49,17 @@ void printCtrlKeys(const ControlSettings& s) {
 void sendInfo() {
   Serial.printf("{\"type\":\"info\",\"fw\":\"%s\",\"ver\":\"%s\",\"sample_ms\":%lu,"
                 "\"tel_ms\":%lu,\"cpr\":[%.1f,%.1f],\"obs_bw\":[%.6g,%.6g],\"obs_zeta\":%.6g,"
-                "\"pwm_max\":%d,\"cap_max\":%lu,\"ref_max\":%.6g,\"v_limit\":%.6g,",
+                "\"pwm_max\":%d,\"cap_max\":%lu,\"ref_max\":%.6g,\"pos_ref_max\":%.6g,"
+                "\"prof_max\":%lu,\"dec_max\":%lu,\"v_limit\":%.6g,",
                 FW_NAME, FW_VERSION,
                 (unsigned long)SAMPLE_PERIOD_MS, (unsigned long)TELEMETRY_PERIOD_MS,
                 ENC1_CPR, ENC2_CPR,
                 (double)samplerObserverBandwidth(0), (double)samplerObserverBandwidth(1),
                 (double)samplerObserverDamping(),
                 MOTOR_PWM_MAX, (unsigned long)CAPTURE_MAX_SAMPLES,
-                (double)CTRL_REF_MAX, (double)SAFETY_V_LIMIT);
+                (double)CTRL_REF_MAX, (double)CTRL_POS_REF_MAX,
+                (unsigned long)PROF_MAX_POINTS, (unsigned long)CAPTURE_DEC_MAX,
+                (double)SAFETY_V_LIMIT);
   printCtrlKeys(controllerSettings());
   Serial.print("}\n");
 }
@@ -68,13 +78,15 @@ void sendTelemetry(const Measurement& m, const ControlOutput& c) {
   char buf[256];
   const int n = snprintf(buf, sizeof(buf),
       "{\"type\":\"tel\",\"t\":%lu,\"p1\":%ld,\"v1\":%.4f,\"p2\":%ld,\"v2\":%.4f,"
-      "\"u\":%d,\"e1\":%lu,\"e2\":%lu,\"mode\":%u,\"ref\":%.4g,\"uc\":%.2f,\"ui\":%.2f,\"sat\":%d}\n",
+      "\"u\":%d,\"e1\":%lu,\"e2\":%lu,\"mode\":%u,\"ref\":%.6g,\"uc\":%.2f,\"ui\":%.2f,"
+      "\"sat\":%d,\"pt\":%ld}\n",
       (unsigned long)m.timeMs,
       (long)m.count[0], m.velocity[0],
       (long)m.count[1], m.velocity[1],
       c.pwm,
       (unsigned long)m.errors[0], (unsigned long)m.errors[1],
-      (unsigned)c.mode, (double)c.ref, (double)c.uPct, (double)c.uI, c.sat ? 1 : 0);
+      (unsigned)c.mode, (double)c.ref, (double)c.uPct, (double)c.uI, c.sat ? 1 : 0,
+      (long)c.profMs);
   if (n > 0 && n < (int)sizeof(buf)) Serial.write(reinterpret_cast<const uint8_t*>(buf), n);
 }
 
@@ -82,8 +94,9 @@ void sendTelemetry(const Measurement& m, const ControlOutput& c) {
 // Columns are listed in "fields"; new columns are only ever appended.
 void dumpCapture() {
   Serial.printf("{\"type\":\"cap_begin\",\"n\":%lu,\"fields\":\"t_us,c1,c2,v1,v2,pwm,ref,ui\","
+                "\"dec\":%lu,\"run\":%s,"
                 "\"obs_bw\":[%.6g,%.6g],\"obs_zeta\":%.6g,\"cpr\":[%.1f,%.1f],\"ctrl\":{",
-                (unsigned long)capCount,
+                (unsigned long)capCount, (unsigned long)capMeta.dec, capMeta.isRun ? "true" : "false",
                 (double)samplerObserverBandwidth(0), (double)samplerObserverBandwidth(1),
                 (double)samplerObserverDamping(),
                 ENC1_CPR, ENC2_CPR);
@@ -103,7 +116,7 @@ void dumpCapture() {
     const int n = snprintf(line, sizeof(line), "%lu,%ld,%ld,%.3f,%.3f,%d,%.3f,%.2f\n",
                            (unsigned long)tUs, (long)s.count[0], (long)s.count[1],
                            s.velMilli[0] * 1e-3f, s.velMilli[1] * 1e-3f, (int)s.pwm,
-                           s.refMilli * 1e-3f, s.uiCenti * 1e-2f);
+                           s.refScaled / capMeta.refScale, s.uiCenti * 1e-2f);
     if (n > 0 && n < (int)sizeof(line)) Serial.write(reinterpret_cast<const uint8_t*>(line), n);
     if ((k & 127) == 127) pollCommands();   // keep "stop" responsive during long dumps
   }
@@ -167,14 +180,14 @@ void cmdPwm(const char* arg) {
 }
 
 // Reserve the capture buffer and start recording; false (error sent) if busy.
-bool startCapture(const char* who, uint32_t n) {
+bool startCapture(const char* who, uint32_t n, uint32_t dec, float refScale) {
   if (capBuffer != nullptr) {
     Serial.printf("{\"type\":\"err\",\"msg\":\"%s: capture busy\"}\n", who);
     return false;
   }
   capBuffer = capStorage;
   capCount  = n;
-  if (!samplerStartCapture(capBuffer, capCount)) {
+  if (!samplerStartCapture(capBuffer, capCount, dec, refScale)) {
     capBuffer = nullptr; capCount = 0;
     Serial.printf("{\"type\":\"err\",\"msg\":\"%s: capture busy\"}\n", who);
     return false;
@@ -182,13 +195,83 @@ bool startCapture(const char* who, uint32_t n) {
   return true;
 }
 
-// "capture <samples>"  -> record samples at 1 kHz, then dump them
+// "<n> [dec]" -> sample count and decimation; false (error sent) if out of range
+bool parseCountDec(const char* who, const char* arg, long& n, long& dec) {
+  char* end = nullptr;
+  n = strtol(arg, &end, 10);
+  if (end == arg || n < 1 || n > (long)CAPTURE_MAX_SAMPLES) {
+    Serial.printf("{\"type\":\"err\",\"msg\":\"%s: sample count out of range\"}\n", who);
+    return false;
+  }
+  const char* p = end;
+  dec = strtol(p, &end, 10);
+  if (end == p) dec = 1;
+  if (dec < 1 || dec > (long)CAPTURE_DEC_MAX) {
+    Serial.printf("{\"type\":\"err\",\"msg\":\"%s: dec must be 1..%lu\"}\n", who,
+                  (unsigned long)CAPTURE_DEC_MAX);
+    return false;
+  }
+  return true;
+}
+
+// "capture <n> [dec]"  -> record n samples, one every dec ms (default 1), then dump them
 void cmdCapture(const char* arg) {
-  long n;
-  if (!parseIntArg(arg, 1, CAPTURE_MAX_SAMPLES, n)) { sendError("capture: sample count out of range"); return; }
-  capMeta = { controllerSettings(), false, 0, 0.0f };
-  if (!startCapture("capture", (uint32_t)n)) return;
-  Serial.printf("{\"type\":\"cap_start\",\"n\":%lu}\n", (unsigned long)capCount);
+  long n, dec;
+  if (!parseCountDec("capture", arg, n, dec)) return;
+  const ControlSettings s = controllerSettings();
+  capMeta = { s, false, 0, 0.0f, (uint32_t)dec, refScaleFor(s.mode), false };
+  if (!startCapture("capture", (uint32_t)n, capMeta.dec, capMeta.refScale)) return;
+  Serial.printf("{\"type\":\"cap_start\",\"n\":%lu,\"dec\":%ld}\n", (unsigned long)capCount, dec);
+}
+
+// "run <n> [dec]"  -> start the reference profile and a capture in the same sample
+void cmdRun(const char* arg) {
+  long n, dec;
+  if (!parseCountDec("run", arg, n, dec)) return;
+  if (controllerProfileCount() == 0) { sendError("run: no profile (use prof add)"); return; }
+  const ControlSettings s = controllerSettings();
+  if (s.mode != MODE_OPEN && controllerProfileMaxAbs() > refLimitFor(s.mode)) {
+    sendError("run: profile out of range for this mode");
+    return;
+  }
+  if (capBuffer != nullptr) { sendError("run: capture busy"); return; }
+  // A profile in degrees (mode 2, or mode 0 as a target for manual tracking) needs the
+  // 0.1-deg resolution: 0.001 units would clip at +-32.767.
+  const float scale = (s.mode == MODE_POS || controllerProfileMaxAbs() > 32.0f) ? 10.0f : 1000.0f;
+  capMeta = { s, false, 0, 0.0f, (uint32_t)dec, scale, true };
+  controllerArmProfile();   // arm first: the capture starts on the next sample
+  if (!startCapture("run", (uint32_t)n, capMeta.dec, capMeta.refScale)) { controllerDisarmProfile(); return; }
+  Serial.printf("{\"type\":\"cap_start\",\"n\":%lu,\"dec\":%ld,\"run\":true}\n",
+                (unsigned long)capCount, dec);
+}
+
+// "prof clear" | "prof add <t_ms> <val>"  -> build the reference profile point by point
+void cmdProfile(const char* arg) {
+  if (strcmp(arg, "clear") == 0) {
+    controllerProfileClear();
+    Serial.print("{\"type\":\"prof\",\"n\":0}\n");
+    return;
+  }
+  if (strncmp(arg, "add ", 4) != 0) { sendError("prof: use 'prof clear' or 'prof add <t_ms> <val>'"); return; }
+  char* end = nullptr;
+  const char* p = arg + 4;
+  const long t = strtol(p, &end, 10);
+  if (end == p || t < 0 || t > (long)PROF_MAX_MS) { sendError("prof: time out of range"); return; }
+  p = end;
+  const float v = strtof(p, &end);
+  if (end == p || !isfinite(v) || fabsf(v) > CTRL_POS_REF_MAX) { sendError("prof: value out of range"); return; }
+  if (!controllerProfileAdd((uint32_t)t, v)) {
+    sendError("prof: full, time not increasing, or profile running");
+    return;
+  }
+  Serial.printf("{\"type\":\"prof\",\"n\":%lu}\n", (unsigned long)controllerProfileCount());
+}
+
+// "zero"  -> angle 0 at the current position (mode 0 only, so the shaft cannot jump)
+void cmdZero() {
+  if (controllerSettings().mode != MODE_OPEN) { sendError("zero: only in mode 0"); return; }
+  samplerZero();
+  sendState();
 }
 
 // "step <val> <n> [pre]"  -> capture n samples; at sample `pre` apply val
@@ -211,27 +294,28 @@ void cmdStep(const char* arg) {
   if (s.mode == MODE_OPEN) {
     if (fabsf(val) > (float)MOTOR_PWM_MAX) { sendError("step: pwm out of range"); return; }
   } else {
-    if (fabsf(val) > CTRL_REF_MAX) { sendError("step: ref out of range"); return; }
+    if (fabsf(val) > refLimitFor(s.mode)) { sendError("step: ref out of range"); return; }
   }
   if (capBuffer != nullptr) { sendError("step: capture busy"); return; }
 
-  capMeta = { s, true, (uint32_t)pre, val };
+  capMeta = { s, true, (uint32_t)pre, val, 1, refScaleFor(s.mode), false };
   controllerArmStep((uint32_t)pre, val);   // arm first: the capture starts on the next sample
-  if (!startCapture("step", (uint32_t)n)) { controllerDisarmStep(); return; }
+  if (!startCapture("step", (uint32_t)n, 1, capMeta.refScale)) { controllerDisarmStep(); return; }
   Serial.printf("{\"type\":\"cap_start\",\"n\":%lu,\"step\":{\"pre\":%ld,\"val\":%.6g,\"mode\":%u}}\n",
                 (unsigned long)capCount, pre, (double)val, (unsigned)s.mode);
 }
 
 void cmdMode(const char* arg) {
   long v;
-  if (!parseIntArg(arg, 0, 1, v)) { sendError("mode: use 0 or 1"); return; }
+  if (!parseIntArg(arg, 0, 2, v)) { sendError("mode: use 0, 1 or 2"); return; }
   controllerSetMode((uint8_t)v);
   sendState();
 }
 
 void cmdRef(const char* arg) {
   float v;
-  if (!parseFloatArg(arg, -CTRL_REF_MAX, CTRL_REF_MAX, v)) { sendError("ref: value out of range"); return; }
+  const float lim = refLimitFor(controllerSettings().mode);
+  if (!parseFloatArg(arg, -lim, lim, v)) { sendError("ref: value out of range"); return; }
   controllerSetRef(v);
   sendState();
 }
@@ -291,19 +375,23 @@ void sendHelp() {
     "#   info               firmware info and current settings (JSON)\n"
     "#   state              current controller settings (JSON)\n"
     "#   tel <0|1>          telemetry stream off/on\n"
-    "#   mode <0|1>         0 = open loop (pwm), 1 = closed-loop velocity control\n"
+    "#   mode <0|1|2>       0 = open loop (pwm), 1 = velocity control, 2 = angle control\n"
     "#   pwm <n>            open-loop motor command, -4000..4000 (mode 0 only)\n"
-    "#   ref <x>            velocity reference [turn/s], -10..10 (used in mode 1)\n"
-    "#   kp <x>             proportional gain [%/(turn/s)], 0..200\n"
-    "#   ki <x>             integral gain [%/turn], 0..2000\n"
-    "#   kd <x>             derivative gain [%*s/turn], 0..10\n"
+    "#   ref <x>            mode 1: velocity [turn/s] -10..10, mode 2: angle [deg] -3000..3000\n"
+    "#   kp <x>             proportional gain, 0..200   [%/(turn/s)] or [%/deg]\n"
+    "#   ki <x>             integral gain, 0..2000      [%/turn] or [%/(deg*s)]\n"
+    "#   kd <x>             derivative gain, 0..10      [%*s/turn] or [%*s/deg]\n"
+    "#   zero               angle 0 at the current position (mode 0 only)\n"
     "#   ts <ms>            controller period, 1..50 ms\n"
     "#   fb <1|2>           feedback encoder: 1 = output shaft, 2 = motor\n"
     "#   umax <x>           controller output limit [%], 1..100\n"
     "#   stop               motor off, ref 0, back to mode 0\n"
     "#   step <v> <n> [pre] capture n samples, apply v at sample pre (default 200)\n"
-    "#                      mode 0: v = pwm, mode 1: v = ref [turn/s]\n"
-    "#   capture <n>        record n samples at 1 kHz (max 5000), then dump CSV\n"
+    "#                      mode 0: v = pwm, modes 1/2: v = ref\n"
+    "#   capture <n> [dec]  record n samples (max 5000), one every dec ms, then dump CSV\n"
+    "#   prof clear         clear the reference profile\n"
+    "#   prof add <t> <v>   add a profile point: t [ms] from start, v = ref (max 24 points)\n"
+    "#   run <n> [dec]      start the profile and a capture of n samples (one every dec ms)\n"
     "#   wd <ms>            stop the motor if no command arrives for ms (0 = off)\n"
     "#   ping               keep-alive for the watchdog (no reply)\n"
     "#   obs_bw <f>         observer bandwidth [Hz] for both encoders\n"
@@ -336,6 +424,9 @@ void handleCommand(const char* cmd) {
   else if (isCmd(cmd, "umax", a))     cmdUMax(a);
   else if (isCmd(cmd, "step", a))     cmdStep(a);
   else if (isCmd(cmd, "capture", a))  cmdCapture(a);
+  else if (isCmd(cmd, "run", a))      cmdRun(a);
+  else if (isCmd(cmd, "prof", a))     cmdProfile(a);
+  else if (strcmp(cmd, "zero") == 0)  cmdZero();
   else if (isCmd(cmd, "wd", a))       cmdWatchdog(a);
   else if (isCmd(cmd, "tel", a))      cmdTelemetry(a);
   else if (isCmd(cmd, "obs_bw", a))   cmdObserverBandwidth(a);

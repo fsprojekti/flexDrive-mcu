@@ -28,6 +28,27 @@ uint32_t stepAt    = 0;
 float    stepVal   = 0.0f;
 uint8_t  stepMode  = MODE_OPEN;
 
+// ---- Reference profile ---------------------------------------------------------------
+struct ProfPoint { uint32_t t; float v; };
+ProfPoint prof[PROF_MAX_POINTS];
+uint32_t  profN      = 0;
+bool      profArmed  = false;
+bool      profActive = false;
+uint32_t  profT      = 0;     // samples since the start [ms]
+
+bool      posInit    = false; // mode 2 entered: take the current angle as ref
+
+float profileValueLocked(uint32_t t) {
+  if (t <= prof[0].t) return prof[0].v;
+  for (uint32_t i = 1; i < profN; ++i) {
+    if (t <= prof[i].t) {
+      const float f = (float)(t - prof[i - 1].t) / (float)(prof[i].t - prof[i - 1].t);
+      return prof[i - 1].v + f * (prof[i].v - prof[i - 1].v);
+    }
+  }
+  return prof[profN - 1].v;
+}
+
 // ---- Safety ----------------------------------------------------------------------------
 uint32_t overspeedSamples = 0;
 uint32_t runawaySamples   = 0;
@@ -54,6 +75,8 @@ void stopLocked() {
   cfg.ref   = 0.0f;
   cfg.pwm   = 0;
   stepArmed = false;
+  profArmed = false; profActive = false;
+  posInit   = false;
   resetDynamicsLocked();
 }
 
@@ -119,32 +142,54 @@ ControlOutput controllerUpdate(const Measurement& m, int64_t nowUs, int32_t capI
     fault = FAULT_WATCHDOG;
   }
 
-  const int   fbIdx = (cfg.fb == 2) ? 1 : 0;
-  const float v     = m.velocity[fbIdx];
+  // ---- Reference profile: starts in capture sample 0, advances 1 ms per sample ---------
+  if (profArmed && capIdx == 0) {
+    profArmed = false; profActive = true; profT = 0;
+    force = true;
+  }
+  int32_t profMs = -1;
+  if (profActive) {
+    cfg.ref = profileValueLocked(profT);
+    profMs  = (int32_t)profT;
+    if (profT >= prof[profN - 1].t) profActive = false;   // last value stays as ref
+    else ++profT;
+  }
+
+  const int   fbIdx  = (cfg.fb == 2) ? 1 : 0;
+  const float v      = m.velocity[fbIdx];
+  const float cprFb  = (fbIdx == 0) ? ENC1_CPR : ENC2_CPR;
+  const float angle  = (float)m.count[fbIdx] * 360.0f / cprFb;   // [deg] since "zero"
+  const float vDeg   = v * 360.0f;                                // [deg/s]
+  const bool  closed = (cfg.mode != MODE_OPEN);
+
+  if (cfg.mode == MODE_POS && posInit) { cfg.ref = angle; posInit = false; }
 
   // ---- Closed-loop safety ------------------------------------------------------------------
-  if (cfg.mode == MODE_CLOSED) {
+  if (closed) {
     const ControlFault f = checkSafetyLocked(m, nowMs, v, fbIdx);
     if (f != FAULT_NONE) { stopLocked(); fault = f; }
   }
 
   // ---- Control law ------------------------------------------------------------------------
   int pwmCmd;
-  if (cfg.mode == MODE_CLOSED) {
+  if (cfg.mode != MODE_OPEN) {   // re-read: a safety stop above may have opened the loop
+    const bool pos = (cfg.mode == MODE_POS);
     ++tick;
     if (force || firstRun || tick >= cfg.tsMs / SAMPLE_PERIOD_MS) {
       tick = 0;
       const float dt = (lastRunUs != 0) ? (float)(nowUs - lastRunUs) * 1e-6f
                                         : (float)cfg.tsMs * 1e-3f;
       lastRunUs = nowUs;
-      if (firstRun) { prevV = v; dFilt = 0.0f; firstRun = false; }
+      if (firstRun) { prevV = v; dFilt = pos ? vDeg : 0.0f; firstRun = false; }
 
-      // D on measurement, first-order filtered
-      const float dv = (v - prevV) / dt;
+      // D on measurement, first-order filtered.
+      // Mode 1: derivative of the velocity. Mode 2: the observer velocity already is the
+      // derivative of the angle, so it is only filtered.
+      const float dIn = pos ? vDeg : (v - prevV) / dt;
       prevV = v;
-      dFilt += (dt / (CTRL_TD_FILTER_MS * 1e-3f + dt)) * (dv - dFilt);
+      dFilt += (dt / (CTRL_TD_FILTER_MS * 1e-3f + dt)) * (dIn - dFilt);
 
-      const float e   = cfg.ref - v;
+      const float e   = cfg.ref - (pos ? angle : v);
       const float uP  = cfg.kp * e;
       const float uD  = -cfg.kd * dFilt;
       const float uIc = uI + cfg.ki * e * dt;
@@ -172,8 +217,9 @@ ControlOutput controllerUpdate(const Measurement& m, int64_t nowUs, int32_t capI
 
   out.mode  = cfg.mode;
   out.pwm   = pwmCmd;
-  out.ref   = cfg.ref;
-  latestOut = out;
+  out.ref    = cfg.ref;
+  out.profMs = profMs;
+  latestOut  = out;
   if (fault != FAULT_NONE) pendingFault = fault;
 
   portEXIT_CRITICAL(&mux);
@@ -205,6 +251,8 @@ void controllerSetMode(uint8_t mode) {
     cfg.mode  = mode;
     cfg.pwm   = 0;
     stepArmed = false;
+    profArmed = false; profActive = false;
+    posInit   = (mode == MODE_POS);
     resetDynamicsLocked();
   }
   portEXIT_CRITICAL(&mux);
@@ -213,6 +261,8 @@ void controllerSetMode(uint8_t mode) {
 void controllerSetRef(float ref) {
   portENTER_CRITICAL(&mux);
   cfg.ref = ref;
+  posInit = false;
+  profArmed = false; profActive = false;
   portEXIT_CRITICAL(&mux);
 }
 
@@ -300,6 +350,48 @@ void controllerFeedWatchdog(uint32_t nowMs) {
   portENTER_CRITICAL(&mux);
   lastFeedMs = nowMs;
   wdTripped  = false;
+  portEXIT_CRITICAL(&mux);
+}
+
+void controllerProfileClear() {
+  portENTER_CRITICAL(&mux);
+  profN = 0; profArmed = false; profActive = false;
+  portEXIT_CRITICAL(&mux);
+}
+
+bool controllerProfileAdd(uint32_t tMs, float val) {
+  portENTER_CRITICAL(&mux);
+  const bool ok = !profActive && !profArmed && profN < PROF_MAX_POINTS &&
+                  (profN == 0 || tMs > prof[profN - 1].t);
+  if (ok) prof[profN++] = { tMs, val };
+  portEXIT_CRITICAL(&mux);
+  return ok;
+}
+
+uint32_t controllerProfileCount() {
+  portENTER_CRITICAL(&mux);
+  const uint32_t n = profN;
+  portEXIT_CRITICAL(&mux);
+  return n;
+}
+
+float controllerProfileMaxAbs() {
+  portENTER_CRITICAL(&mux);
+  float mx = 0.0f;
+  for (uint32_t i = 0; i < profN; ++i) mx = fmaxf(mx, fabsf(prof[i].v));
+  portEXIT_CRITICAL(&mux);
+  return mx;
+}
+
+void controllerArmProfile() {
+  portENTER_CRITICAL(&mux);
+  if (profN > 0) { profArmed = true; profActive = false; posInit = false; }
+  portEXIT_CRITICAL(&mux);
+}
+
+void controllerDisarmProfile() {
+  portENTER_CRITICAL(&mux);
+  profArmed = false;
   portEXIT_CRITICAL(&mux);
 }
 
