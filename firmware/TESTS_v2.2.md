@@ -42,3 +42,23 @@ Manual tracking in mode 0 (profile recorded as target) works; a simple scripted
 
 - `run` in mode 0 stored the profile with the turn/s resolution and clipped it at 32.8°;
   the capture now uses 0.1° units whenever the profile exceeds ±32.
+
+## Velocity control of the output shaft (mode 1, fb 1) — used by MKT VL4
+
+Open-loop step u 20 → 40 % (velocity of encoder 1, after 1.5 s at 20 %): ω0 = 1.21, ω∞ = 2.54 turn/s,
+K = 0.066 (turn/s)/%, tangent at the inflection L ≈ 0.05–0.07 s, T ≈ 0.08–0.12 s — a clean S curve.
+The motor velocity (encoder 2) is not usable for ZN: it jumps, dips on the coupling and only then settles.
+
+Closed loop, step ref 2 → 4 turn/s, and a 30 s profile 1 → 3 → ramp 5 → 2 → ramp 1 turn/s
+(ref streamed by the PC as `ref` commands, recorded with `capture 3000 10`; J = mean |e|):
+
+| Kp / Ki / Kd | Overshoot | e_ss [turn/s] | J [turn/s] |
+|---|---|---|---|
+| 18.1 / 0 / 0 (ZN, L 0.070, T 0.083) | 0 % | 1.87 | 1.43 |
+| 30 / 0 / 0 | 0 % | 1.33–1.57 | 1.08–1.09 |
+| 40 / 0 / 0 | oscillates | | |
+| 16.3 / 70.5 / 0 (ZN) | 4 % | 0.01 | 0.082 |
+| 20 / 90 / 0 | 9–10 % | 0.00 | 0.079–0.084 |
+| 21.8 / 156 / 0.76 (ZN) | 9 % | 0.00 | 0.058 |
+| 20 / 150 / 1.2 | 8–10 % | 0.01 | 0.052–0.061 |
+| 46.5 / 502 / 1.08 (ZN from a steeper hand-drawn tangent, L 0.046, T 0.119) | 37 % | | 0.69 |
