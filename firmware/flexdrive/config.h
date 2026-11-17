@@ -7,7 +7,7 @@
 
 // ---- Firmware identity ------------------------------------------------------
 #define FW_NAME    "flexDrive"
-#define FW_VERSION "2.2.0"
+#define FW_VERSION "2.2.1"
 
 // ---- Serial link to PC / web page --------------------------------------------
 constexpr uint32_t SERIAL_BAUD = 921600;   // CH9102 USB-UART; needed for 1 kHz capture dumps
@@ -87,6 +87,12 @@ constexpr float    CTRL_POS_REF_MAX   = 3000.0f;  // |ref| limit in mode 2 [deg]
 constexpr uint32_t PROF_MAX_POINTS    = 24;
 constexpr uint32_t PROF_MAX_MS        = 120000;
 constexpr uint32_t CAPTURE_DEC_MAX    = 50;       // capture decimation: one sample every n ms
+
+// ---- Calibration of this model ("cal") ----------------------------------------------
+// A JSON object written by the teacher's page (e.g. grading thresholds from autotuning),
+// stored in NVS flash and reported in "info" as "cal".
+constexpr size_t   CMD_LINE_MAX       = 320;      // longest command line [chars]
+constexpr size_t   CAL_MAX_LEN        = 300;      // longest stored calibration [chars]
 
 // ---- Step test ("step" command) ---------------------------------------------------
 constexpr uint32_t STEP_PRE_DEFAULT = 200;        // samples recorded before the step

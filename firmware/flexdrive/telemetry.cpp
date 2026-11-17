@@ -2,10 +2,12 @@
 #include "config.h"
 #include "sampler.h"
 #include "controller.h"
+#include <Preferences.h>
 
 namespace {
 
-char   cmdBuf[64];
+char   cmdBuf[CMD_LINE_MAX + 1];
+char   calJson[CAL_MAX_LEN + 1] = "";   // calibration from NVS, "" = none
 size_t cmdLen = 0;
 
 // Statically reserved: a 100 kB malloc at runtime fails due to heap fragmentation.
@@ -47,7 +49,12 @@ void printCtrlKeys(const ControlSettings& s) {
 }
 
 void sendInfo() {
-  Serial.printf("{\"type\":\"info\",\"fw\":\"%s\",\"ver\":\"%s\",\"sample_ms\":%lu,"
+  // Board id: last three bytes of the factory MAC, so a page can tell the models apart.
+  const uint64_t mac = ESP.getEfuseMac();
+  Serial.printf("{\"type\":\"info\",\"id\":\"%02X%02X%02X\",\"cal\":%s,",
+                (unsigned)((mac >> 24) & 0xFF), (unsigned)((mac >> 32) & 0xFF), (unsigned)((mac >> 40) & 0xFF),
+                calJson[0] ? calJson : "null");
+  Serial.printf("\"fw\":\"%s\",\"ver\":\"%s\",\"sample_ms\":%lu,"
                 "\"tel_ms\":%lu,\"cpr\":[%.1f,%.1f],\"obs_bw\":[%.6g,%.6g],\"obs_zeta\":%.6g,"
                 "\"pwm_max\":%d,\"cap_max\":%lu,\"ref_max\":%.6g,\"pos_ref_max\":%.6g,"
                 "\"prof_max\":%lu,\"dec_max\":%lu,\"v_limit\":%.6g,",
@@ -396,7 +403,31 @@ void sendHelp() {
     "#   ping               keep-alive for the watchdog (no reply)\n"
     "#   obs_bw <f>         observer bandwidth [Hz] for both encoders\n"
     "#   obs_bw <f1> <f2>   observer bandwidth [Hz] per encoder\n"
-    "#   obs_zeta <z>       observer damping (0.3..3)\n");
+    "#   obs_zeta <z>       observer damping (0.3..3)\n"
+    "#   cal {json}         store this model's calibration in flash (shown in info)\n"
+    "#   cal clear          erase the stored calibration\n");
+}
+
+// "cal {json}" stores this model's calibration in NVS, "cal clear" erases it.
+// The firmware does not parse the JSON; it only checks the braces and the length.
+void cmdCal(const char* arg) {
+  const size_t n = strlen(arg);
+  Preferences prefs;
+  if (strcmp(arg, "clear") == 0) {
+    prefs.begin("flexdrive", false);
+    prefs.remove("cal");
+    prefs.end();
+    calJson[0] = '\0';
+  } else if (n >= 2 && n <= CAL_MAX_LEN && arg[0] == '{' && arg[n - 1] == '}') {
+    prefs.begin("flexdrive", false);
+    prefs.putString("cal", arg);
+    prefs.end();
+    strcpy(calJson, arg);
+  } else {
+    sendError("cal: use cal {json} (max 300 chars) or cal clear");
+    return;
+  }
+  sendInfo();
 }
 
 bool isCmd(const char* cmd, const char* name, const char*& arg) {
@@ -429,6 +460,7 @@ void handleCommand(const char* cmd) {
   else if (strcmp(cmd, "zero") == 0)  cmdZero();
   else if (isCmd(cmd, "wd", a))       cmdWatchdog(a);
   else if (isCmd(cmd, "tel", a))      cmdTelemetry(a);
+  else if (isCmd(cmd, "cal", a))      cmdCal(a);
   else if (isCmd(cmd, "obs_bw", a))   cmdObserverBandwidth(a);
   else if (isCmd(cmd, "obs_zeta", a)) cmdObserverDamping(a);
   else sendError("unknown command");
@@ -479,6 +511,11 @@ void telemetryTask(void*) {
 }  // namespace
 
 void telemetryBegin() {
+  Preferences prefs;
+  if (prefs.begin("flexdrive", true)) {   // read-only; fails harmlessly before the first "cal"
+    prefs.getString("cal", calJson, sizeof(calJson));
+    prefs.end();
+  }
   xTaskCreatePinnedToCore(telemetryTask, "telemetry", 4096, nullptr,
                           TELEMETRY_PRIORITY, nullptr, RT_CORE);
 }

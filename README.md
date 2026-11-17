@@ -231,5 +231,17 @@ behind the elastic coupling. With `fb 1` the shaft keeps swinging on the couplin
 (~2 Hz, ±20°) while the motor sticks in its dead zone, and the loop limit-cycles even with
 ZN gains. With `fb 2` the loop is well behaved and encoder 1 shows the coupling swing.
 
-Measured on the lab unit (2026-11-16) are in `firmware/TESTS_v2.2.md`. The student
+### v2.2.1: board id and per-model calibration
+
+| Command | Range | Reply | Notes |
+|---|---|---|---|
+| `cal {json}` | JSON object, at most 300 characters | `info` | stored in NVS flash, survives reset and reflashing the same partition layout |
+| `cal clear` | | `info` | erases the stored calibration |
+
+`info` now starts with `"id"` (last three bytes of the factory MAC, e.g. `"1DE5C4"`) and
+`"cal"` (the stored JSON object, or `null`). The firmware does not interpret the content;
+the VL4 page stores the grading limits of each model there (written from its Admin tab
+after autotuning). Command lines may now be up to 320 characters long.
+
+Measurements on the lab unit (2026-11-16) are in `firmware/TESTS_v2.2.md`. The student
 page for the lab exercise (MKT VL4) is maintained in the course repository.

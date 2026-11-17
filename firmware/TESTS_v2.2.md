@@ -62,3 +62,23 @@ Closed loop, step ref 2 → 4 turn/s, and a 30 s profile 1 → 3 → ramp 5 → 
 | 21.8 / 156 / 0.76 (ZN) | 9 % | 0.00 | 0.058 |
 | 20 / 150 / 1.2 | 8–10 % | 0.01 | 0.052–0.061 |
 | 46.5 / 502 / 1.08 (ZN from a steeper hand-drawn tangent, L 0.046, T 0.119) | 37 % | | 0.69 |
+
+### v2.2.1 (2026-11-17): profile in both directions, run on the MCU, Admin autotuning
+
+Profile (30 s, `prof add` + `run 3000 10`): 1 → 3 → ramp 5 → −2 → ramp −5 → 2 → ramp −2 → 4 → 0 turn/s.
+Open loop 20 → 40 %: K = 0.066 (turn/s)/%, L = 0.050–0.053 s, T = 0.106–0.115 s.
+
+| Kp / Ki / Kd | Overshoot (step 2 → 4) | J [turn/s] |
+|---|---|---|
+| 32.1 / 0 / 0 (ZN) | 0 % | 1.18 (1.27 with Kp 32.9: oscillates at times) |
+| 27.3 / 0 / 0 | | 1.14 (best P; 24.1 → 1.19, 30.5 → 1.15) |
+| 28.9 / 174 / 0 (ZN) | 54 % | 1.44 (oscillates, u ±100 %) |
+| 14.5 / 109 / 0 | 6 % | 0.25 (best PI) |
+| 38.5 / 387 / 0.96 (ZN) | 24 % | 0.49 |
+| 19.3 / 149 / 0.96 | 8 % | 0.14 (best PID with overshoot < 10 %) |
+| 25 / 250 / 1.2 | 17 % | 0.13 |
+
+The Admin tab of the VL4 page found these automatically in 9 minutes (ZN, 4 P profiles,
+9 PI and 12 PID step tests, 3 profiles each) and stored limits = best J × 1.15 on the
+model with `cal`. An aggressive PID step (Kp 25, Ki 193, Kd 1.25) tripped the `encoder`
+safety stop once (more than 10 missed edges in 100 ms on encoder 1).
