@@ -245,3 +245,24 @@ after autotuning). Command lines may now be up to 320 characters long.
 
 Measurements on the lab unit (2026-11-16) are in `firmware/TESTS_v2.2.md`. The student
 page for the lab exercise (MKT VL4) is maintained in the course repository.
+
+## Basic firmware in one file (`firmware/flexdrive_basic/`)
+
+`flexdrive_basic.ino` is a simpler version of v2.2.1 in one sketch, with comments in Slovenian.
+Encoders are decoded in external (pin change) interrupts; the 1 kHz loop (observer,
+controller, capture) is a FreeRTOS task woken every 1 ms by `vTaskDelayUntil` (priority 5,
+core 1); `loop()` reads commands and sends telemetry and captures; one mutex guards the
+shared state. Measured sample period 1000 ± 7 us (the first interval of a capture up to
++0.2 ms). It speaks the same commands and
+messages as v2.2.1 for everything the VL4 page (`maketa.html`) uses, so the lab exercise
+works unchanged. The observer (70/40 Hz, zeta 0.707) and the PID (D on measurement,
+5 ms filter, conditional integration) compute exactly as in v2.2.1, so the grading
+limits stay valid (model 1DE5C4, 2026-11-18: K 0.066 from the 20 -> 60 % step, E 11.7 % with
+PI 14.5/109 and 6.0 % with PID 20/150/1.2, as on v2.2.1). Missed encoder edges are the same
+as on v2.2.1 (~130 in the same moves), so they come from the encoder, not the firmware. It reports `"fw":"flexDrive-basic","ver":"2.2.1-basic"`.
+
+Commands: `help info state tel mode(0/1) pwm ref kp ki kd ts fb umax stop step prof run wd ping`.
+Left out compared with v2.2.1: angle control (mode 2), `zero`, `capture`, `cal`, `obs_bw`,
+`obs_zeta`, and the runaway and encoder-error stops (overspeed and the watchdog remain).
+
+Board: TTGO LoRa32 (`esp32:esp32:ttgo-lora32`), Arduino core esp32 3.x.
