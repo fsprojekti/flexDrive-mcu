@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+    <meta charset="UTF-8" />
+    <title>FlexDrive Web Serial Console</title>
+    <style>
+        :root {
+            --blue: #1c7ed6;
+            --border: #d9d9d9;
+            --bg-light: #f8f9fa;
+            --bg-panel: #ffffff;
+            --text-main: #222;
+            --text-muted: #555;
+            --radius: 6px;
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            background: #f1f3f5;
+            color: var(--text-main);
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.6rem;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        @media (max-width: 960px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 14px;
+            margin-bottom: 12px;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .panel-title {
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            border: 1px solid #ccc;
+            background: #f1f3f5;
+            color: #555;
+        }
+
+        .status-pill.connected {
+            border-color: var(--blue);
+            color: var(--blue);
+            background: #e7f5ff;
+        }
+
+        button {
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: #ffffff;
+            padding: 5px 10px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        button.primary {
+            background: var(--blue);
+            color: #fff;
+            border-color: var(--blue);
+        }
+
+        button.small {
+            font-size: 0.8rem;
+            padding: 4px 8px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+
+        .field-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 6px;
+            align-items: center;
+        }
+
+        input[type="number"],
+        input[type="text"] {
+            padding: 4px 6px;
+            font-size: 0.85rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            width: 80px;
+        }
+
+        input.command-input {
+            width: 100%;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 999px;
+            background: #e9ecef;
+            font-size: 0.75rem;
+            color: #555;
+            margin-left: 4px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            resize: vertical;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            padding: 6px;
+            font-size: 0.8rem;
+            font-family: "JetBrains Mono", "Fira Code", monospace;
+            background: #0b1020;
+            color: #e9ecef;
+            line-height: 1.3;
+            white-space: pre;
+            overflow: auto;
+        }
+
+        .hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .plot-container {
+            background: #0b1020;
+            border-radius: var(--radius);
+            border: 1px solid #20263a;
+            padding: 6px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 200px;
+            display: block;
+            border-radius: 4px;
+            background: #050712;
+        }
+
+        .pill-option-group {
+            display: inline-flex;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            font-size: 0.8rem;
+        }
+
+        .pill-option {
+            padding: 3px 10px;
+            border-right: 1px solid var(--border);
+            cursor: pointer;
+            background: #f8f9fa;
+            color: #555;
+            user-select: none;
+        }
+
+        .pill-option:last-child {
+            border-right: none;
+        }
+
+        .pill-option.active {
+            background: #e7f5ff;
+            color: var(--blue);
+            font-weight: 600;
+        }
+
+        .footer-note {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+<h1>🔧 FlexDrive – Web Serial vmesnik</h1>
+<div class="subtitle">
+    Poveži se z ESP32, pošiljaj CLI ukaze (<code>mode</code>, <code>run</code>, <code>ref</code>, <code>kp</code> …)
+    in spremljaj odziv sistema. Deluje v brskalnikih s podporo za
+    <strong>Web Serial API</strong> (npr. Chrome, Edge).
+</div>
+
+<div class="container">
+    <!-- LEFT SIDE: controls -->
+    <div>
+        <!-- Connection panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">🔌 Povezava</div>
+                <div id="status-pill" class="status-pill">● Disconnected</div>
+            </div>
+            <div class="btn-row">
+                <button id="connect-btn" class="primary">🔗 Connect</button>
+                <button id="disconnect-btn" disabled>⏏ Disconnect</button>
+            </div>
+            <div class="hint">
+                Če gumb ne deluje, uporabite Chrome/Edge in omogočite HTTPS (če je mogoče).
+            </div>
+        </div>
+
+        <!-- Mode & Run panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">🎛️ Način in pogon</div>
+            </div>
+            <div class="field-row">
+                <label>Mode:</label>
+                <div class="pill-option-group">
+                    <div class="pill-option active" data-mode="0" id="mode-open">Open (0)</div>
+                    <div class="pill-option" data-mode="1" id="mode-closed">Closed (1)</div>
+                </div>
+            </div>
+            <div class="btn-row">
+                <button id="run-btn" class="small">▶ run</button>
+                <button id="stop-btn" class="small">⏹ stop</button>
+            </div>
+        </div>
+
+        <!-- Reference & PID panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">⚙️ Reference & PID</div>
+            </div>
+
+            <div class="field-row">
+                <label for="ref-input">ref [obr/s]:</label>
+                <input type="number" step="0.1" id="ref-input" value="2.5" />
+                <button id="set-ref-btn" class="small">Set ref</button>
+            </div>
+
+            <div class="field-row">
+                <label for="kp-input">Kp:</label>
+                <input type="number" step="0.1" id="kp-input" value="5" />
+                <button id="set-kp-btn" class="small">Set Kp</button>
+            </div>
+
+            <div class="field-row">
+                <label for="ki-input">Ki:</label>
+                <input type="number" step="0.01" id="ki-input" value="0" />
+                <button id="set-ki-btn" class="small">Set Ki</button>
+            </div>
+
+            <div class="field-row">
+                <label for="kd-input">Kd:</label>
+                <input type="number" step="0.01" id="kd-input" value="0" />
+                <button id="set-kd-btn" class="small">Set Kd</button>
+            </div>
+        </div>
+
+        <!-- Timing & plotting panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">📈 Čas vzorčenja & plot</div>
+            </div>
+
+            <div class="field-row">
+                <label for="ts-input">ts [ms]:</label>
+                <input type="number" id="ts-input" value="10" />
+                <button id="set-ts-btn" class="small">Set ts</button>
+            </div>
+
+            <div class="field-row">
+                <label for="plot-period-input">plot_period:</label>
+                <input type="number" id="plot-period-input" value="5" />
+                <button id="set-plot-period-btn" class="small">Set plot_period</button>
+            </div>
+
+            <div class="btn-row">
+                <button id="plot-open-btn" class="small">📊 plotSerialOpen</button>
+                <button id="plot-closed-btn" class="small">📊 plotSerialClosed</button>
+            </div>
+
+            <div class="hint">
+                Za nalogo τ uporabite tipično: <code>ts 10</code>, <code>plot_period 5</code>, <code>plotSerialClosed</code>.
+            </div>
+        </div>
+
+        <!-- Custom command -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">⌨️ Ročni ukaz</div>
+            </div>
+            <div class="field-row" style="flex-direction:column; align-items:stretch;">
+                <input type="text" id="command-input" class="command-input" placeholder="npr. ref 2.5 ali kp 10" />
+                <div class="btn-row" style="margin-top:6px;">
+                    <button id="send-cmd-btn" class="small">Send</button>
+                    <button id="clear-log-btn" class="small">Clear log</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT SIDE: log + plot -->
+    <div>
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">📝 Serijski log</div>
+                <span class="badge">read-only</span>
+            </div>
+            <textarea id="log" readonly></textarea>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">📈 Plot – hitrost (vel)</div>
+                <span class="badge">experimental</span>
+            </div>
+            <div class="plot-container">
+                <canvas id="plot-canvas" width="400" height="200"></canvas>
+            </div>
+            <div class="hint">
+                Plot poskuša iz <code>plotSerialClosed</code> vrstic obdelati <code>vel:&lt;številka&gt;</code> in izrisati hitrost.
+                Arduino Serial Plotter je še vedno uradno priporočeno orodje.
+            </div>
+        </div>
+
+        <div class="footer-note">
+            ℹ️ Napravo vedno najprej konfigurirajte s CLI ukazi (mode, ref, kp...) in šele nato analizirajte odziv.
+        </div>
+    </div>
+</div>
+
+<script>
+    // Web Serial related variables
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let readLoopActive = false;
+    let textDecoder = new TextDecoder();
+    let textEncoder = new TextEncoder();
+    let readBuffer = "";
+
+    const logEl = document.getElementById("log");
+    const statusPill = document.getElementById("status-pill");
+
+    const connectBtn = document.getElementById("connect-btn");
+    const disconnectBtn = document.getElementById("disconnect-btn");
+    const runBtn = document.getElementById("run-btn");
+    const stopBtn = document.getElementById("stop-btn");
+    const modeOpen = document.getElementById("mode-open");
+    const modeClosed = document.getElementById("mode-closed");
+
+    const refInput = document.getElementById("ref-input");
+    const kpInput = document.getElementById("kp-input");
+    const kiInput = document.getElementById("ki-input");
+    const kdInput = document.getElementById("kd-input");
+    const tsInput = document.getElementById("ts-input");
+    const plotPeriodInput = document.getElementById("plot-period-input");
+
+    const setRefBtn = document.getElementById("set-ref-btn");
+    const setKpBtn = document.getElementById("set-kp-btn");
+    const setKiBtn = document.getElementById("set-ki-btn");
+    const setKdBtn = document.getElementById("set-kd-btn");
+    const setTsBtn = document.getElementById("set-ts-btn");
+    const setPlotPeriodBtn = document.getElementById("set-plot-period-btn");
+    const plotOpenBtn = document.getElementById("plot-open-btn");
+    const plotClosedBtn = document.getElementById("plot-closed-btn");
+
+    const cmdInput = document.getElementById("command-input");
+    const sendCmdBtn = document.getElementById("send-cmd-btn");
+    const clearLogBtn = document.getElementById("clear-log-btn");
+
+    // Plotting variables
+    const canvas = document.getElementById("plot-canvas");
+    const ctx = canvas.getContext("2d");
+    const velocityData = [];
+    const maxPoints = 300;
+
+    function appendLog(text) {
+        logEl.value += text;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setConnectedUI(connected) {
+        if (connected) {
+            statusPill.textContent = "● Connected";
+            statusPill.classList.add("connected");
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = false;
+        } else {
+            statusPill.textContent = "● Disconnected";
+            statusPill.classList.remove("connected");
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        }
+    }
+
+    async function connect() {
+        if (!("serial" in navigator)) {
+            alert("Web Serial API ni podprt v tem brskalniku. Uporabite Chrome ali Edge.");
+            return;
+        }
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 115200 });
+            appendLog(">> Connected to serial port\n");
+            setConnectedUI(true);
+
+            writer = port.writable.getWriter();
+            reader = port.readable.getReader();
+            readLoopActive = true;
+            readLoop();
+        } catch (err) {
+            console.error(err);
+            appendLog("!! Napaka pri povezavi: " + err.message + "\n");
+        }
+    }
+
+    async function disconnect() {
+        readLoopActive = false;
+        try {
+            if (reader) {
+                await reader.cancel();
+                reader.releaseLock();
+                reader = null;
+            }
+            if (writer) {
+                writer.releaseLock();
+                writer = null;
+            }
+            if (port) {
+                await port.close();
+                port = null;
+            }
+            appendLog(">> Disconnected\n");
+        } catch (err) {
+            console.error(err);
+            appendLog("!! Napaka pri odklopu: " + err.message + "\n");
+        }
+        setConnectedUI(false);
+    }
+
+    async function readLoop() {
+        while (readLoopActive && reader) {
+            try {
+                const { value, done } = await reader.read();
+                if (done) {
+                    break;
+                }
+                if (value) {
+                    const chunk = textDecoder.decode(value);
+                    handleIncomingText(chunk);
+                }
+            } catch (err) {
+                console.error("Read error", err);
+                appendLog("!! Napaka pri branju: " + err.message + "\n");
+                break;
+            }
+        }
+    }
+
+    function handleIncomingText(chunk) {
+        readBuffer += chunk;
+        appendLog(chunk);
+
+        let lines = readBuffer.split(/\r?\n/);
+        readBuffer = lines.pop(); // keep incomplete
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            parseForVelocity(trimmed);
+        }
+    }
+
+    function parseForVelocity(line) {
+        // Expect lines like: "pwm:1234 ref:2.50 vel:1.23"
+        const velMatch = line.match(/vel\s*:\s*([-+]?\d*\.?\d+)/i);
+        if (velMatch) {
+            const v = parseFloat(velMatch[1]);
+            if (!isNaN(v)) {
+                velocityData.push(v);
+                if (velocityData.length > maxPoints) {
+                    velocityData.shift();
+                }
+                drawPlot();
+            }
+        }
+    }
+
+    function drawPlot() {
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        if (velocityData.length < 2) {
+            // axes only
+            ctx.strokeStyle = "#444";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(30, h - 20);
+            ctx.lineTo(w - 10, h - 20); // x-axis
+            ctx.moveTo(30, 10);
+            ctx.lineTo(30, h - 20); // y-axis
+            ctx.stroke();
+            return;
+        }
+
+        const marginLeft = 30;
+        const marginBottom = 20;
+        const marginTop = 10;
+        const plotWidth = w - marginLeft - 10;
+        const plotHeight = h - marginTop - marginBottom;
+
+        const maxVal = Math.max(...velocityData);
+        const minVal = Math.min(...velocityData);
+        const range = maxVal - minVal || 1;
+
+        // Axes
+        ctx.strokeStyle = "#444";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(marginLeft, marginTop);
+        ctx.lineTo(marginLeft, h - marginBottom);
+        ctx.lineTo(w - 10, h - marginBottom);
+        ctx.stroke();
+
+        // axis labels
+        ctx.fillStyle = "#888";
+        ctx.font = "10px monospace";
+        ctx.fillText(maxVal.toFixed(2), 2, marginTop + 5);
+        ctx.fillText(minVal.toFixed(2), 2, h - marginBottom);
+
+        // Plot line
+        ctx.strokeStyle = "#4dabf7";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        velocityData.forEach((v, i) => {
+            const x = marginLeft + (i / (velocityData.length - 1)) * plotWidth;
+            const y = marginTop + (1 - (v - minVal) / range) * plotHeight;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    }
+
+    async function sendCommand(cmd) {
+        if (!port || !writer) {
+            appendLog("!! Ni povezave, ukaz ni poslan: " + cmd + "\n");
+            return;
+        }
+        if (!cmd.endsWith("\n")) {
+            cmd += "\n";
+        }
+        try {
+            await writer.write(textEncoder.encode(cmd));
+            appendLog(">> " + cmd);
+        } catch (err) {
+            console.error(err);
+            appendLog("!! Napaka pri pošiljanju: " + err.message + "\n");
+        }
+    }
+
+    // Event listeners
+    connectBtn.addEventListener("click", connect);
+    disconnectBtn.addEventListener("click", disconnect);
+
+    runBtn.addEventListener("click", () => sendCommand("run"));
+    stopBtn.addEventListener("click", () => sendCommand("stop"));
+
+    modeOpen.addEventListener("click", () => {
+        sendCommand("mode 0");
+        modeOpen.classList.add("active");
+        modeClosed.classList.remove("active");
+    });
+    modeClosed.addEventListener("click", () => {
+        sendCommand("mode 1");
+        modeClosed.classList.add("active");
+        modeOpen.classList.remove("active");
+    });
+
+    setRefBtn.addEventListener("click", () => {
+        const v = refInput.value.trim();
+        if (v !== "") sendCommand("ref " + v);
+    });
+    setKpBtn.addEventListener("click", () => {
+        const v = kpInput.value.trim();
+        if (v !== "") sendCommand("kp " + v);
+    });
+    setKiBtn.addEventListener("click", () => {
+        const v = kiInput.value.trim();
+        if (v !== "") sendCommand("ki " + v);
+    });
+    setKdBtn.addEventListener("click", () => {
+        const v = kdInput.value.trim();
+        if (v !== "") sendCommand("kd " + v);
+    });
+
+    setTsBtn.addEventListener("click", () => {
+        const v = tsInput.value.trim();
+        if (v !== "") sendCommand("ts " + v);
+    });
+    setPlotPeriodBtn.addEventListener("click", () => {
+        const v = plotPeriodInput.value.trim();
+        if (v !== "") sendCommand("plot_period " + v);
+    });
+
+    plotOpenBtn.addEventListener("click", () => {
+        sendCommand("plotSerialOpen");
+    });
+    plotClosedBtn.addEventListener("click", () => {
+        sendCommand("plotSerialClosed");
+    });
+
+    sendCmdBtn.addEventListener("click", () => {
+        const cmd = cmdInput.value.trim();
+        if (cmd) {
+            sendCommand(cmd);
+            cmdInput.value = "";
+        }
+    });
+
+    cmdInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            sendCmdBtn.click();
+        }
+    });
+
+    clearLogBtn.addEventListener("click", () => {
+        logEl.value = "";
+    });
+
+    // Initial UI
+    setConnectedUI(false);
+    drawPlot();
+</script>
+</body>
+</html>

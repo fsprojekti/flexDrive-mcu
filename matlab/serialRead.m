@@ -77,6 +77,7 @@ end
 %% Outputs: Read a line, parse for encoder data, and output the data.
 function Outputs(block)
     global serialPortObj;
+    global read
     try
         rawData = readline(serialPortObj);
         encoderData = checkAndConvert(rawData);
@@ -93,7 +94,7 @@ function Outputs(block)
     
     block.OutputPort(1).Data = encoderData;
     % pause for 10ms
-    %pause(0.01);
+    %pause(0.01)
 end
 
 %% Terminate: Send shutdown command and close the port.
